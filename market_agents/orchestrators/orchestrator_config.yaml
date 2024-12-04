@@ -1,0 +1,12 @@
+bot:
+  name: "TARS"
+  personas_dir: "./market_agents/agents/personas/generated_personas"
+llm_config:
+  client: "openai"
+  model: "gpt-4o"
+  temperature: 0.8
+  max_tokens: 2048
+  #client: "vllm"
+  #model: "Qwen/QwQ-32B-Preview"
+  #temperature: 0.8
+  #max_tokens: 2048
