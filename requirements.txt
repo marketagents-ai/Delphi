@@ -1,0 +1,31 @@
+discord==2.3.2
+tiktoken==0.8.0
+pyyaml==6.0.2
+sentence-transformers==3.3.1
+nltk==3.8.1
+
+# Vector Search
+faiss-cpu==1.9.0.post1
+
+# GitHub Integration
+PyGithub==2.5.0
+
+# File Processing and Formatting
+markdown2==2.5.0
+Pillow==11.0.0
+
+# API and HTTP
+aiohttp==3.11.6
+requests==2.32.3
+
+# Development Tools
+colorama==0.4.6
+names==0.3.0
+
+# Core Dependencies
+openai==1.56.1
+pydantic==2.8.2
+python-dotenv==1.0.1
+tenacity==9.0.0
+anthropic==0.40.0
+pydantic-settings==2.6.1
