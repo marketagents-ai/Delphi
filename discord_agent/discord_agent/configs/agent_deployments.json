@@ -1,8 +1,8 @@
 [
     {
-        "name": "agent_deployment_1",
-        "module": {"name": "module_template"},
-        "worker_node_url": "http://localhost:7001",
+        "name": "tars_deployment",
+        "module": {"name": "discord_agent"},
+        "worker_node_url": "http://node.naptha.ai:7001",
         "agent_config": {
             "config_name": "agent_config_1",
             "llm_config": {"config_name": "model_2"},
