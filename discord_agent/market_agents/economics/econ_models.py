@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, computed_field, model_validator
 from functools import cached_property
-from typing import List, Dict, Self
+from typing import List, Dict
 import random
 from copy import deepcopy
 from datetime import datetime
@@ -41,19 +41,6 @@ class SavableBaseModel(BaseModel):
             raise
         
         return file_path
-
-    @classmethod
-    def load_from_json(cls, file_path: str) -> Self:
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-            return cls.model_validate(data)
-        except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from {file_path}")
-            print(f"Error message: {str(e)}")
-            with open(file_path, 'r') as f:
-                print(f"File contents:\n{f.read()}")
-            raise
     
 class MarketAction(BaseModel):
     price: float = Field(..., description="Price of the order")

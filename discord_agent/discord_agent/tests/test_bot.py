@@ -2,7 +2,7 @@ import asyncio
 import discord
 from unittest.mock import MagicMock, AsyncMock
 from contextlib import asynccontextmanager
-from discord_agent.discord_bot import setup_bot, process_message, process_files, send_long_message, truncate_middle, update_temperature
+from discord.discord_bot import setup_bot, process_message, process_files, send_long_message, truncate_middle, update_temperature
 
 # Add this helper class for mocking async context managers
 class AsyncContextManagerMock:

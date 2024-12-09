@@ -1,0 +1,11 @@
+[
+    {
+        "name": "agent_orchestrator_1",
+        "module": "module_template",
+        "orchestrator_node_url": "http://localhost:7001",
+        "orchestrator_config": {
+            "config_name": "agent_orchestrator_config_1",
+            "max_rounds": 10
+        }
+    }
+]
