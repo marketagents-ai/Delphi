@@ -8,6 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = ">=3.10,<=3.13"
 naptha-sdk = {git = "https://github.com/NapthaAI/naptha-sdk.git"}
+market_agents = { path = "market_agents", develop = true }
 python-dotenv = "^1.0.1"
 discord = "2.3.2"
 tiktoken = "0.8.0"
@@ -27,6 +28,7 @@ pydantic = "2.8.2"
 tenacity = "9.0.0"
 anthropic = "0.40.0"
 pydantic-settings = "2.6.1"
+psycopg2-binary = "2.9.10"
 
 [build-system]
 requires = ["poetry-core"]
