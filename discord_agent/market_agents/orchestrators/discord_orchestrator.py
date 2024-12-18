@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import asyncio
 
+from market_agents.memory.memory import MemoryObject
 from market_agents.orchestrators.config import settings
 from market_agents.agents.market_agent import MarketAgent
 from market_agents.inference.message_models import LLMConfig
@@ -20,9 +21,6 @@ from market_agents.environments.mechanisms.discord import (
 )
 
 import discord
-
-# Import UserMemoryIndex to handle memory storage
-from discord_agent.memory import UserMemoryIndex
 
 # Load environment variables
 load_dotenv()
@@ -40,9 +38,6 @@ class MessageProcessor:
         self.bot_id = None
         self.agent = None
         self.environment = None
-
-        # Initialize the memory index for storing reflections
-        self.memory_index = UserMemoryIndex('agent_memory_index')
 
     async def initialize_bot_id(self):
         """Initialize bot_id once the bot is ready"""
@@ -108,7 +103,7 @@ class MessageProcessor:
             logger.error(f"Error setting up agent: {str(e)}", exc_info=True)
             return False
 
-    async def process_messages(self, channel_info, messages, message_type=None):
+    async def process_messages(self, channel_info, messages, message_type=None, user_info=None):
         """Process messages through the agent's cognitive functions"""
         try:
             if not messages:
@@ -123,6 +118,16 @@ class MessageProcessor:
                 "messages": messages
             }
             self.environment.mechanism.update_state(environment_info)
+
+            metadata = {
+                'channel_id': channel_info["id"],
+                'channel_name': channel_info["name"]
+            }
+            if user_info:
+                metadata.update({
+                    'user_id': user_info['user_id'],
+                    'user_name': user_info['user_name']
+                })
             
             # Run cognitive functions
             logger.info("Starting agent cognitive functions")
@@ -134,6 +139,15 @@ class MessageProcessor:
                 logger.info("Perception completed")
                 print("\nPerception Result:")
                 print("\033[94m" + json.dumps(perception_result, indent=2) + "\033[0m")
+                
+                # Store perception in memory
+                if perception_result:
+                    self.bot.memory_store.store_memory(MemoryObject(
+                        agent_id=self.bot_id,
+                        cognitive_step="perception",
+                        content=json.dumps(perception_result),
+                        metadata=metadata
+                    ))
 
             # Action Generation
             action_schema = None
@@ -144,12 +158,36 @@ class MessageProcessor:
                 perception=perception_result,
                 action_schema=action_schema
             )
+            if message_type and message_type == "auto":
+                action_result = {
+                    "agent_id": self.bot_id,
+                    "action": action_result
+                }
             logger.info("Action generation completed")
             print("\nAction Result:")
             print("\033[92m" + json.dumps(action_result, indent=2) + "\033[0m")
 
+            # Store action in memory
+            if action_result:
+                self.bot.memory_store.store_memory(MemoryObject(
+                    agent_id=self.bot_id,
+                    cognitive_step="action",
+                    content=json.dumps(action_result),
+                    metadata=metadata
+                ))
+
+            # Update environment state with action result
+            if action_result:
+                self.environment.mechanism.update_state({
+                    "bot_id": self.bot_id,
+                    "channel_id": channel_info["id"],
+                    "channel_name": channel_info["name"],
+                    "messages": messages,
+                    "last_action": action_result
+                })
+
             # Create task for reflection to run in parallel
-            reflection_task = asyncio.create_task(self._run_reflection())
+            reflection_task = asyncio.create_task(self._run_reflection(metadata))
 
             # Return action result immediately
             response = {
@@ -168,7 +206,7 @@ class MessageProcessor:
             logger.error(f"Error processing messages: {str(e)}", exc_info=True)
             return None
 
-    async def _run_reflection(self):
+    async def _run_reflection(self, metadata):
         """Run reflection as a separate async task"""
         try:
             # Reflection
@@ -177,18 +215,14 @@ class MessageProcessor:
             print("\nReflection Result:")
             print("\033[93m" + json.dumps(reflection_result, indent=2) + "\033[0m")
 
-            # Store reflection outputs to memory
-            if self.agent.memory:
-                last_memory = self.agent.memory[-1]
-                if last_memory.get('type') == 'reflection':
-                    reflection_content = last_memory.get('content', '')
-                    timestamp = last_memory.get('timestamp', datetime.now().isoformat())
-                    # Save to memory index
-                    user_id = self.agent.id
-                    memory_text = f"Reflection at {timestamp}: {reflection_content}"
-                    self.memory_index.add_memory(user_id, memory_text)
-                    self.memory_index.save_cache()
-                    logger.info("Saved reflection to memory index")
+            # Store reflection in memory
+            if reflection_result:
+                self.bot.memory_store.store_memory(MemoryObject(
+                    agent_id=self.bot_id,
+                    cognitive_step="reflection",
+                    content=json.dumps(reflection_result),
+                    metadata=metadata
+                ))
 
             return reflection_result
 
