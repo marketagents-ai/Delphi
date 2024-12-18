@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "market_agents"
+version = "0.1.0"
+description = "Market agents package"
+authors = ["interstellarninja <ninjainterstellar@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<=3.13"
+pydantic = "*"
+asyncio = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
