@@ -27,7 +27,7 @@ class DiscordAutoMessage(BaseModel):
     decision: Literal["hold", "post"] = Field(
         description="Whether to post or hold the message. Use 'hold' when relevance is low or message lacks appropriate humor/context for TARS bot."
     )
-    content: str = Field(
+    message: str = Field(
         description="The actual message content to post to Discord if decision is post"
     )
 
@@ -76,7 +76,7 @@ class DiscordObservationSpace(ObservationSpace):
 
 class DiscordMechanism(Mechanism):
     max_rounds: int = Field(default=1000, description="Maximum number of simulation rounds")
-    current_round: int = Field(default=0, description="Current round number")
+    current_round: int = Field(default=0, description="Current round number") 
     sequential: bool = Field(default=False, description="Whether the mechanism is sequential")
     messages: List[DiscordInputMessage] = Field(default_factory=list)
     global_state: Dict[str, Any] = Field(default_factory=dict)  # Add global_state field
@@ -113,17 +113,33 @@ class DiscordMechanism(Mechanism):
         observation = self._create_observation(action.agent_id)
         done = self.current_round >= self.max_rounds
 
+        env_info = {
+            "current_round": self.current_round,
+            "all_messages": [message.dict() for message in self.messages]
+        }
+
+        # Calculate reward based on action content
+        reward = self._calculate_reward(action)
+
         local_step = LocalEnvironmentStep(
             observation=observation,
-            reward=0,
+            reward=reward,
             done=done,
-            info={
-                "current_round": self.current_round,
-                "all_messages": [message.dict() for message in self.messages],
-            }
+            info=env_info
         )
 
+        if not hasattr(self, 'history'):
+            self.history = []
+        self.history.append((action, local_step))
+
         return local_step
+    
+    def _calculate_reward(self, action: DiscordAction) -> float:
+        """Calculate reward based on action content."""
+        # Return 1.0 if action has content, 0.0 otherwise
+        if action and action.action and action.action.content:
+            return 1.0
+        return 0.0
 
     def _create_observation(self, agent_id: str) -> DiscordLocalObservation:
         """
