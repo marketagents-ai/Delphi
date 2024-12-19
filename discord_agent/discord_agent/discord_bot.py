@@ -1,36 +1,20 @@
 import discord
-from discord import TextChannel
 from discord.ext import commands
 
 import logging
-import asyncio
 import os
-import mimetypes
 import tiktoken
 import json
 from datetime import datetime
-import re
-import pickle
 from collections import defaultdict, Counter
 import yaml
-import argparse
-from github import Github
-from github import GithubException, UnknownObjectException
-import base64
-import string
-import threading
 import nltk
 nltk.download('punkt', quiet=True)
 from nltk.tokenize import sent_tokenize
 
 from discord_agent.bot_config import *
 from market_agents.orchestrators.discord_orchestrator import MessageProcessor
-from discord_agent.tools.discordSUMMARISER import ChannelSummarizer
-from discord_agent.tools.discordGITHUB import *
-
-from PIL import Image
-import io
-import traceback
+from discord_agent.knowledge_base.github_kb import GitHubKnowledgeBase
 
 from market_agents.memory.config import load_config_from_yaml
 from market_agents.memory.setup_db import DatabaseConnection
@@ -53,9 +37,6 @@ def update_temperature(intensity):
     global TEMPERATURE
     TEMPERATURE = intensity / 100.0
     logging.info(f"Updated temperature to {TEMPERATURE}")
-
-repo_processing_event = threading.Event()
-repo_processing_event.set()
 
 async def process_message(message, memory_store, memory_query, bot, is_command=False):
     user_id = str(message.author.id)
@@ -187,15 +168,12 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
             'error': str(e)
         })
 
-async def process_files(message, memory_store, memory_query, bot, user_message=""):
+async def process_files(message, memory_store, memory_query, bot, user_message="", knowledge_base=None, query_mode=False):
     user_id = str(message.author.id)
     user_name = message.author.name
     agent_id = str(bot.user.id)
 
-    if not message.attachments:
-        raise ValueError("No attachments found in message")
-
-    logging.info(f"Processing files from {user_name} (ID: {user_id})")
+    logging.info(f"Processing request from {user_name} (ID: {user_id}) in {'query_mode' if query_mode else 'file_mode'}")
 
     try:
         async with message.channel.typing():
@@ -204,6 +182,7 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 'name': message.channel.name if hasattr(message.channel, 'name') else 'Direct Message'
             }
 
+            # Retrieve recent interactions
             recent_interactions = memory_store.get_memories(
                 agent_id,
                 metadata_filters={'user_id': user_id},
@@ -212,26 +191,54 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
 
             messages = []
             for interaction in recent_interactions:
-                if 'user_message' in interaction:
+                conversation_record = json.loads(interaction.content)
+                if 'user_message' in conversation_record:
                     messages.append({
-                        'content': interaction['user_message'],
+                        'content': conversation_record['user_message'],
                         'author_id': user_id,
                         'author_name': user_name,
                         'timestamp': message.created_at.isoformat()
                     })
-                if 'ai_response' in interaction:
+                if 'ai_response' in conversation_record:
                     messages.append({
-                        'content': interaction['ai_response'],
+                        'content': conversation_record['ai_response'],
                         'author_id': str(bot.user.id),
                         'author_name': bot.user.name,
                         'timestamp': message.created_at.isoformat()
                     })
 
-            attachment_descriptions = []
-            for attachment in message.attachments:
-                attachment_descriptions.append(f"{attachment.filename} ({attachment.url})")
+            if query_mode:
+                # Query mode: we assume user_message is a query to the knowledge base
+                if not knowledge_base:
+                    raise ValueError("No knowledge_base provided for query_mode")
 
-            content = f"{message.content}\nAttachments: {', '.join(attachment_descriptions)}"
+                kb_results = memory_query.search_knowledge_base(user_message, top_k=10)
+                # Add kb results as context
+                for i, res in enumerate(kb_results, 1):
+                    chunk_text = f"[Repo Chunk {i} | Sim: {res.similarity:.3f}]\n{res.text}"
+                    messages.append({
+                        'content': chunk_text,
+                        'author_id': str(bot.user.id),
+                        'author_name': 'SystemContext',
+                        'timestamp': message.created_at.isoformat()
+                    })
+                
+                content = user_message
+            else:
+                # File mode
+                if not message.attachments:
+                    raise ValueError("No attachments found in message")
+
+                attachment_descriptions = []
+                for attachment in message.attachments:
+                    if attachment.size > 1000000:
+                        await message.channel.send("File is too large. Please upload a file smaller than 1 MB.")
+                        return
+                    attachment_descriptions.append(f"{attachment.filename} ({attachment.url})")
+
+                content = f"{message.content}\nAttachments: {', '.join(attachment_descriptions)}"
+
+            # Add the current user message or query
             messages.append({
                 'content': content,
                 'author_id': user_id,
@@ -239,6 +246,7 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 'timestamp': message.created_at.isoformat()
             })
 
+            # Process with the agent
             result = await bot.message_processor.process_messages(channel_info, messages)
             action_result = result.get('action')
 
@@ -247,14 +255,14 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 await send_long_message(message.channel, response_content)
                 logging.info(f"Sent response to {user_name} (ID: {user_id}): {response_content[:1000]}...")
 
-                # Store this file interaction as well
+                # Store interaction
                 conversation_record = {
                     "user_message": content,
                     "ai_response": response_content
                 }
                 memory_store.store_memory(MemoryObject(
                     agent_id=agent_id,
-                    cognitive_step="file_analysis",
+                    cognitive_step="conversation" if query_mode else "file_analysis",
                     content=json.dumps(conversation_record),
                     metadata={
                         'user_id': user_id,
@@ -262,8 +270,9 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                     }
                 ))
 
+                log_event = 'repo_query' if query_mode else 'file_analysis'
                 log_to_jsonl({
-                    'event': 'file_analysis',
+                    'event': log_event,
                     'timestamp': datetime.now().isoformat(),
                     'user_id': user_id,
                     'user_name': user_name,
@@ -273,12 +282,13 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 })
             else:
                 logging.error("No action content received from the agent")
-                await message.channel.send("I'm sorry, I couldn't process those files.")
+                await message.channel.send("I'm sorry, I couldn't process that request.")
 
     except Exception as e:
-        error_message = f"An error occurred while analyzing files: {str(e)}"
+        error_message = f"An error occurred: {str(e)}"
         await message.channel.send(error_message)
-        logging.error(f"Error in file analysis for {user_name} (ID: {user_id}): {str(e)}")
+        logging.error(f"Error in processing for {user_name} (ID: {user_id}): {str(e)}")
+
 
 async def send_long_message(channel, message, max_length=1800):
     segments = []
@@ -350,9 +360,12 @@ def setup_bot():
 
     config = load_config_from_yaml(config_path)
     db_conn = DatabaseConnection(config)
+    db_conn.connect()
     embedding_service = MemoryEmbedder(config)
     memory_store = MarketMemory(config, db_conn, embedding_service)
     memory_query = MemoryRetriever(config, db_conn, embedding_service)
+    github_kb = GitHubKnowledgeBase(config, db_conn, embedding_service)
+
 
     prompt_formats_path = os.path.join(script_dir, 'prompts', 'prompt_formats.yaml')
     system_prompts_path = os.path.join(script_dir, 'prompts', 'system_prompts.yaml')
@@ -364,9 +377,11 @@ def setup_bot():
         system_prompts = yaml.safe_load(file)
 
     bot.persona_intensity = DEFAULT_PERSONA_INTENSITY
-
+    bot.config = config
+    bot.db_conn = db_conn
     bot.memory_store = memory_store
     bot.memory_query = memory_query
+    bot.github_kb = github_kb
     bot.prompt_formats = prompt_formats
     bot.system_prompts = system_prompts
     bot.message_processor = MessageProcessor(bot)
@@ -375,6 +390,29 @@ def setup_bot():
     @bot.event
     async def on_ready():
         logging.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
+        
+        # Check if repo is already indexed
+        bot.db_conn.cursor.execute("""
+            SELECT COUNT(*) FROM knowledge_objects 
+            WHERE metadata->>'source' = 'github'
+        """)
+        count = bot.db_conn.cursor.fetchone()[0]
+
+        if count == 0:
+            logging.info("No GitHub repository indexed. Starting initial indexing...")
+            try:
+                await bot.github_kb.ingest_from_github_repo(
+                    token=GITHUB_TOKEN,
+                    repo_name=REPO_NAME,
+                    max_depth=2,
+                    branch='main'
+                )
+                logging.info("Repository indexed successfully!")
+            except Exception as e:
+                logging.error(f"Error indexing repository: {str(e)}")
+        else:
+            logging.info(f"Found {count} existing GitHub documents in knowledge base")
+
         logging.info('------')
         log_to_jsonl({
             'event': 'bot_ready',
@@ -531,6 +569,23 @@ def setup_bot():
             )
         except Exception as e:
             await ctx.send(f"Error processing file: {str(e)}")
+
+    @bot.command(name='ask_repo')
+    async def ask_repo(ctx, *, query: str):
+        try:
+            await process_files(
+                message=ctx.message,
+                memory_store=bot.memory_store,
+                memory_query=bot.memory_query,
+                bot=bot,
+                user_message=query,
+                knowledge_base=bot.github_kb,
+                query_mode=True
+            )
+        except Exception as e:
+            await ctx.send(f"Error processing repo query: {str(e)}")
+
+
 
     return bot
 
