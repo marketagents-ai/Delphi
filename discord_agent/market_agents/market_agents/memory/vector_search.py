@@ -83,7 +83,7 @@ if __name__ == "__main__":
     from config import load_config_from_yaml
     from setup_db import DatabaseConnection
     from embedding import MemoryEmbedder
-    from discord_agent.market_agents.memory.knowledge_base import MarketKnowledgeBase
+    from knowledge_base import MarketKnowledgeBase
     from memory import MarketMemory, MemoryObject
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     Strong performance in cloud services division.
     Earnings per share of $1.45 exceeded analyst estimates.
     """
-    knowledge_base.ingest_document(test_doc)
+    knowledge_base.ingest_knowledge(test_doc)
 
     # Store some test agent memories
     memory_store = MarketMemory(config, db_conn, embedder)

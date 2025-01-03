@@ -3,6 +3,9 @@ name = "market_agents"
 version = "0.1.0"
 description = "Market agents package"
 authors = ["interstellarninja <ninjainterstellar@gmail.com>"]
+packages = [
+    { include = "market_agents"}
+]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<=3.13"

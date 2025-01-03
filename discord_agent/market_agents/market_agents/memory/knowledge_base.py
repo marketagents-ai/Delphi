@@ -167,11 +167,7 @@ class SemanticChunker(KnowledgeChunker):
 
 if __name__ == "__main__":
     import os
-    from config import load_config_from_yaml
-    from setup_db import DatabaseConnection
-    from embedding import MemoryEmbedder
-    from knowledge_base import MarketKnowledgeBase
-
+    from memory.config import load_config_from_yaml
     # Load configuration and initialize services
     current_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(current_dir, "memory_config.yaml")
@@ -227,5 +223,3 @@ if __name__ == "__main__":
         print(f"Error during document ingestion or retrieval: {e}")
     finally:
         db_conn.conn.close()
-
-
