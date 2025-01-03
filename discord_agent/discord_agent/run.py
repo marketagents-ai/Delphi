@@ -1,10 +1,8 @@
 #!/usr/bin/env python
-import os
 from dotenv import load_dotenv
-from naptha_sdk.schemas import AgentRunInput, OrchestratorRunInput, EnvironmentRunInput
+from naptha_sdk.schemas import AgentRunInput
 from naptha_sdk.utils import get_logger
 from discord_agent.schemas import InputSchema
-from typing import Union
 import asyncio
 
 # Import existing Discord bot functionality
@@ -14,15 +12,15 @@ load_dotenv()
 logger = get_logger(__name__)
 
 class DiscordAgent:
-    def __init__(self, module_run: Union[AgentRunInput, OrchestratorRunInput, EnvironmentRunInput]):
+    def __init__(self, module_run):
         self.module_run = module_run
         self.bot = None
 
-    async def start(self):
+    async def start_bot(self, input_data):
         """Start the Discord bot using existing setup"""
         try:
-            # Get Discord token from inputs or env
-            token = self.module_run.inputs.get("discord_token")
+            # Get Discord token from inputs
+            token = input_data.get("discord_token")
             if not token:
                 raise ValueError("Discord token not provided in inputs")
 
@@ -30,13 +28,19 @@ class DiscordAgent:
             self.bot = setup_bot()
             await self.bot.start(token)
             
+            # Keep running until stopped
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                await self.stop()
+            
             return {
                 "status": "success",
-                "message": "Discord bot started successfully"
+                "message": "Discord bot stopped gracefully"
             }
             
         except Exception as e:
-            logger.error(f"Error starting Discord bot: {str(e)}")
+            logger.error(f"Error in Discord bot: {str(e)}")
             return {
                 "status": "error",
                 "error": str(e)
@@ -47,54 +51,37 @@ class DiscordAgent:
         if self.bot:
             await self.bot.close()
 
-async def run(module_run: Union[AgentRunInput, OrchestratorRunInput, EnvironmentRunInput]):
+def run(module_run):
     """Main entry point for running the Discord agent"""
-    try:
-        agent = DiscordAgent(module_run)
-        result = await agent.start()
-        
-        if result.get("status") == "error":
-            return result
-            
-        # Keep running until stopped
-        try:
-            await asyncio.Future()
-        except asyncio.CancelledError:
-            await agent.stop()
-            
-        return {
-            "status": "success",
-            "message": "Discord bot stopped gracefully"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in Discord agent: {str(e)}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+    agent = DiscordAgent(module_run)
+    method = getattr(agent, module_run.inputs.func_name, None)
+    return asyncio.run(method(module_run.inputs.func_input_data))
 
 if __name__ == "__main__":
     from naptha_sdk.client.naptha import Naptha
-    from naptha_sdk.configs import load_agent_deployments
+    from naptha_sdk.configs import setup_module_deployment
+    import os
 
     naptha = Naptha()
 
-    # Load Configs
-    agent_deployments = load_agent_deployments(
-        "discord_agent/configs/agent_deployments.json", 
-        load_persona_data=False, 
-        load_persona_schema=False
-    )
+    # Setup module deployment
+    deployment = asyncio.run(setup_module_deployment(
+        "agent",
+        "discord_agent/configs/agent_deployments.json",
+        node_url=os.getenv("NODE_URL")
+    ))
 
-    input_params = {
-        "discord_token": os.getenv("DISCORD_TOKEN")
-    }
+    # Prepare input parameters
+    input_params = InputSchema(
+        func_name="start_bot",
+        func_input_data={"discord_token": os.getenv("DISCORD_TOKEN")}
+    )
     
-    agent_run = AgentRunInput(
+    module_run = AgentRunInput(
         inputs=input_params,
-        agent_deployment=agent_deployments[0],
+        deployment=deployment,
         consumer_id=naptha.user.id,
     )
 
-    asyncio.run(run(agent_run))
+    response = run(module_run)
+    print("Response: ", response)
