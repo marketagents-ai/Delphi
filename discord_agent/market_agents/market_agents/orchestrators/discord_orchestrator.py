@@ -46,27 +46,37 @@ class MessageProcessor:
         else:
             raise ValueError("Bot user is not initialized")
 
-    async def setup_agent(self):
+    async def setup_agent(self, persona=None):
         """Initialize the TARS agent with persona and environment"""
         try:
-            # Load the specific persona file for the configured bot
-            persona_file = settings.bot.personas_dir / f"{settings.bot.name.lower()}.yaml"
-            if not persona_file.exists():
-                raise ValueError(f"Persona file for {settings.bot.name} not found at {persona_file}")
+            if persona:
+                if isinstance(persona, dict):
+                    agent_persona = Persona(
+                        name=persona.get('name'),
+                        role=persona.get('role'),
+                        persona=persona.get('persona', '')
+                    )
+                else:
+                    agent_persona = persona
+            else:
+                 # Load the specific persona file for the configured bot
+                persona_file = settings.bot.personas_dir / f"{settings.bot.name.lower()}.yaml"
+                if not persona_file.exists():
+                    raise ValueError(f"Persona file for {settings.bot.name} not found at {persona_file}")
 
-            # Load the specific persona
-            with open(persona_file, 'r') as file:
-                persona_data = yaml.safe_load(file)
-                agent_persona = Persona(
-                    name=persona_data['name'],
-                    role=persona_data['role'],
-                    persona=persona_data['persona'],
-                    objectives=persona_data['objectives'],
-                    trader_type=persona_data['trader_type'],
-                    communication_style=persona_data['communication_style'],
-                    routines=persona_data['routines'],
-                    skills=persona_data['skills']
-                )
+                # Load the specific persona
+                with open(persona_file, 'r') as file:
+                    persona_data = yaml.safe_load(file)
+                    agent_persona = Persona(
+                        name=persona_data['name'],
+                        role=persona_data['role'],
+                        persona=persona_data['persona'],
+                        objectives=persona_data['objectives'],
+                        trader_type=persona_data['trader_type'],
+                        communication_style=persona_data['communication_style'],
+                        routines=persona_data['routines'],
+                        skills=persona_data['skills']
+                    )
 
             # Create Discord environment
             discord_mechanism = DiscordMechanism()
