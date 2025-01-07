@@ -78,7 +78,7 @@ if __name__ == "__main__":
     # Setup module deployment
     deployment = asyncio.run(setup_module_deployment(
         "agent",
-        "discord_agent/configs/agent_deployments.json",
+        "discord_agent/configs/deployment.json",
         node_url=os.getenv("NODE_URL"),
         load_persona_data=True
     ))
