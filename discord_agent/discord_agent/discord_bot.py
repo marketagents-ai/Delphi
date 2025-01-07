@@ -362,8 +362,7 @@ def setup_bot(persona=None):
     db_conn.connect()
     embedding_service = MemoryEmbedder(config)
     
-    # Pass the bot user ID (as agent_id) to MarketMemory so it uses agent-specific table
-    # For knowledge retrieval, just keep using MemoryRetriever
+    bot.memory_store = MarketMemory(config, db_conn, embedding_service, agent_id="discord_agent")
     bot.memory_query = MemoryRetriever(config, db_conn, embedding_service)
 
     prompt_formats_path = os.path.join(script_dir, 'prompts', 'prompt_formats.yaml')
@@ -431,6 +430,8 @@ def setup_bot(persona=None):
     async def on_message(message):
         if message.author == bot.user:
             return
+        
+        bot.db_conn.ensure_connection()
 
         ctx = await bot.get_context(message)
         if ctx.valid:

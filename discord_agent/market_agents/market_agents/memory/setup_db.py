@@ -129,3 +129,10 @@ class DatabaseConnection:
         except Exception as e:
             self.conn.rollback()
             raise e
+        
+    def ensure_connection(self):
+        """Ensure database connection is active, reconnect if needed"""
+        try:
+            self.cursor.execute("SELECT 1")
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            self.connect()
