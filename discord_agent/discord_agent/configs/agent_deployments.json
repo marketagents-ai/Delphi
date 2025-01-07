@@ -1,7 +1,15 @@
 [
     {
         "name": "tars_deployment",
-        "module": {"name": "discord_agent"},
+        "module": {
+            "name": "discord_agent",
+            "description": "TARS Discord Agent",
+            "parameters": "{func_name: str, func_input_data: Union[list, str]}",
+            "module_type": "agent",
+            "module_version": "v0.1",
+            "module_entrypoint": "run.py",
+            "execution_type": "package"
+        },
         "node": {
             "ip":"http://node.naptha.ai:7001"
         },
