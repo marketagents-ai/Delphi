@@ -13,12 +13,56 @@ import time
 from datetime import datetime, timezone
 
 class GitHubKnowledgeBase(MarketKnowledgeBase):
-    def __init__(self, config, db_conn: DatabaseConnection, embedding_service: MemoryEmbedder):
-        super().__init__(config, db_conn, embedding_service, chunking_method=CodeChunker())
-    
+    def __init__(self, config, db_conn: DatabaseConnection, embedding_service: MemoryEmbedder, table_prefix: str = "github"):
+        """
+        :param config: dict-like configuration
+        :param db_conn: DatabaseConnection instance
+        :param embedding_service: MemoryEmbedder instance
+        :param table_prefix: Will create/use table_prefix_knowledge_objects and table_prefix_knowledge_chunks
+        """
+        super().__init__(
+            config=config,
+            db_conn=db_conn,
+            embedding_service=embedding_service,
+            table_prefix=table_prefix,
+            chunking_method=CodeChunker()
+        )
+
     ALLOWED_EXTENSIONS = {'.py', '.md', '.txt', '.yaml', '.yml', '.json'}
 
-    def ingest_from_github_repo(self, token: str, repo_name: str, max_depth: Optional[int] = None, branch: str = 'main', current_path: str = "", current_depth: int = 0):
+    def _check_file_ingestion(self, file_path: str, repo_name: str) -> bool:
+        """Check if a file has already been ingested into the knowledge base."""
+        self.db.connect()
+        # Use the prefix-based knowledge_objects_table
+        knowledge_objects_table = f"{self.table_prefix}_knowledge_objects"
+
+        self.db.cursor.execute(f"""
+            SELECT COUNT(*)
+            FROM {knowledge_objects_table}
+            WHERE metadata->>'source' = 'github'
+              AND metadata->>'file_path' = %s
+              AND metadata->>'repo_name' = %s
+        """, (file_path, repo_name))
+        return self.db.cursor.fetchone()[0] > 0
+
+    def ingest_from_github_repo(
+        self,
+        token: str,
+        repo_name: str,
+        max_depth: Optional[int] = None,
+        branch: str = 'main',
+        current_path: str = "",
+        current_depth: int = 0
+    ):
+        """
+        Recursively ingest all allowed files from a GitHub repo into the knowledge base.
+        :param token: Personal access token (PAT) for GitHub
+        :param repo_name: "username/reponame" or org
+        :param max_depth: Depth limit for folder traversal
+        :param branch: Which branch to pull from
+        :param current_path: Internally used for recursion
+        :param current_depth: Internally used for recursion
+        """
         if max_depth is not None and current_depth > max_depth:
             return
 
@@ -57,7 +101,14 @@ class GitHubKnowledgeBase(MarketKnowledgeBase):
             
             for content in batch:
                 if content.type == 'dir':
-                    self.ingest_from_github_repo(token, repo_name, max_depth, branch, content.path, current_depth+1)
+                    self.ingest_from_github_repo(
+                        token,
+                        repo_name,
+                        max_depth,
+                        branch,
+                        content.path,
+                        current_depth + 1
+                    )
                 elif content.type == 'file':
                     # Skip large files (>1MB)
                     if content.size > 1000000:
@@ -67,6 +118,11 @@ class GitHubKnowledgeBase(MarketKnowledgeBase):
                     _, file_extension = os.path.splitext(content.path)
                     if file_extension.lower() not in self.ALLOWED_EXTENSIONS:
                         logging.debug(f"Skipping unsupported file extension: {content.path}")
+                        continue
+
+                    # Check if file is already ingested
+                    if self._check_file_ingestion(content.path, repo_name):
+                        logging.info(f"File already ingested: {content.path}")
                         continue
 
                     # Check rate limit before each file
@@ -102,7 +158,9 @@ class GitHubKnowledgeBase(MarketKnowledgeBase):
                     except Exception as ingest_err:
                         logging.error(f"Error ingesting {content.path}: {str(ingest_err)}")
 
+            # Slight delay to be polite to GitHub’s API
             time.sleep(1)
+
 
 class CodeChunker(KnowledgeChunker):
     def __init__(self, min_size: int = 100, max_size: int = 2000):
@@ -136,6 +194,7 @@ class CodeChunker(KnowledgeChunker):
             if not segment:
                 continue
             
+            # If it's purely import statements, accumulate them
             if re.match(r'^(\s*(?:from|import)\s+[a-zA-Z_]\w*[\s\w\.,]*)+$', segment):
                 if current_chunk:
                     current_chunk.append(segment)
@@ -145,6 +204,7 @@ class CodeChunker(KnowledgeChunker):
                     current_length = len(segment)
                 continue
 
+            # If it's a class definition with an internal method, we split that out first
             if re.match(r'^\s*class\s+', segment):
                 method_match = re.search(r'(.*?\n\s*def\s+.*?)(?=\n\s*def|\Z)', segment, re.DOTALL)
                 if method_match:
@@ -162,7 +222,8 @@ class CodeChunker(KnowledgeChunker):
                         segment = rest
                     else:
                         continue
-            
+
+            # If adding this segment to current_chunk would exceed max_size, finalize the existing chunk
             if current_length + len(segment) > self.max_size:
                 if current_chunk:
                     chunk_text = '\n\n'.join(current_chunk)
@@ -175,6 +236,7 @@ class CodeChunker(KnowledgeChunker):
                     current_chunk = []
                     current_length = 0
                 
+                # Put the new segment in its own chunk
                 chunks.append(KnowledgeChunk(
                     text=segment,
                     start=current_pos,
@@ -182,9 +244,11 @@ class CodeChunker(KnowledgeChunker):
                 ))
                 current_pos += len(segment) + 1
             else:
+                # Accumulate the segment
                 current_chunk.append(segment)
                 current_length += len(segment)
         
+        # If something remains in current_chunk, flush it
         if current_chunk:
             chunk_text = '\n\n'.join(current_chunk)
             chunks.append(KnowledgeChunk(
@@ -203,34 +267,29 @@ if __name__ == "__main__":
 
     load_dotenv()
 
-    # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-    # Test configuration
     TEST_REPO = "marketagents-ai/MarketAgents"
     TEST_BRANCH = "main"
     MAX_DEPTH = 2
 
     try:
-        # Verify GitHub token
         GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
         if not GITHUB_TOKEN:
             raise ValueError("GITHUB_TOKEN environment variable is not set")
 
-        # Load configuration
         config_path = os.path.join("market_agents/memory", "memory_config.yaml")
         logging.info(f"Loading config from {config_path}")
         config = load_config_from_yaml(config_path)
 
-        # Initialize components
-        logging.info("Initializing database and embedder")
         db_conn = DatabaseConnection(config)
         embedder = MemoryEmbedder(config)
-        # Initialize and test knowledge base
-        kb = GitHubKnowledgeBase(config, db_conn, embedder)
+        
+        # Initialize GitHubKnowledgeBase with prefix "github"
+        kb = GitHubKnowledgeBase(config, db_conn, embedder, table_prefix="github")
         
         logging.info(f"Starting ingestion of {TEST_REPO}")
         kb.ingest_from_github_repo(
@@ -245,4 +304,3 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Error during ingestion: {str(e)}", exc_info=True)
         raise
-
