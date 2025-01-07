@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 import yaml
 import random
 from pathlib import Path
@@ -7,13 +7,13 @@ import names
 
 class Persona(BaseModel):
     name: str
-    role: str
+    role: str 
     persona: str
-    objectives: List[str]
-    trader_type: List[str]
-    communication_style: str
-    routines: List[str]
-    skills: List[str]
+    objectives: Optional[List[str]] = None
+    trader_type: Optional[List[str]] = None
+    communication_style: Optional[str] = None
+    routines: Optional[List[str]] = None
+    skills: Optional[List[str]] = None
 
 def generate_persona() -> Persona:
     # Gender and Name
