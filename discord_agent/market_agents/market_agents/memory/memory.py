@@ -17,31 +17,30 @@ class MemoryObject(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 class MarketMemory:
-    """
-    A memory module that can:
-    - Store memories with embeddings and metadata
-    - Retrieve recent or filtered memories by various criteria (cognitive_step, metadata keys, time ranges, etc.)
-    - Support both short-term (chronological) and long-term (embedding-based) retrieval
-    """
-    def __init__(self, config, db_conn: DatabaseConnection, embedder: MemoryEmbedder):
+
+    def __init__(self, config, db_conn: DatabaseConnection, embedder: MemoryEmbedder, agent_id: str):
         self.config = config
         self.db = db_conn
         self.embedder = embedder
+        self.agent_id = agent_id
+        self.memory_table = f"agent_{agent_id}_memory"
+
+        self.db.create_agent_memory_table(agent_id)
 
     def store_memory(self, memory_object: MemoryObject):
+        """Store a memory object in the agent's specific memory table."""
         self.db.connect()
         try:
             # Generate embedding if not provided
             if memory_object.embedding is None:
                 memory_object.embedding = self.embedder.get_embeddings(memory_object.content)
 
-            self.db.cursor.execute("""
-                INSERT INTO agent_memory (memory_id, agent_id, cognitive_step, content, embedding, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s)
+            self.db.cursor.execute(f"""
+                INSERT INTO {self.memory_table} (memory_id, cognitive_step, content, embedding, metadata)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING created_at;
             """, (
                 str(memory_object.memory_id),
-                memory_object.agent_id,
                 memory_object.cognitive_step,
                 memory_object.content,
                 memory_object.embedding,
@@ -55,20 +54,17 @@ class MarketMemory:
 
     def get_memories(
         self,
-        agent_id: str,
         limit: int = 10,
         cognitive_step: Union[str, List[str], None] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
     ) -> List[MemoryObject]:
-        """
-        Retrieve memories filtered by optional parameters, sorted by recency (created_at DESC).
-        """
+        """Retrieve memories from the agent's specific memory table."""
         self.db.connect()
 
-        conditions = ["agent_id = %s"]
-        params = [agent_id]
+        conditions = []
+        params = []
 
         if cognitive_step:
             if isinstance(cognitive_step, str):
@@ -93,11 +89,11 @@ class MarketMemory:
             conditions.append("created_at <= %s")
             params.append(end_time)
 
-        where_clause = " AND ".join(conditions)
+        where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
         query = f"""
-            SELECT memory_id, agent_id, cognitive_step, content, embedding, created_at, metadata
-            FROM agent_memory
+            SELECT memory_id, cognitive_step, content, embedding, created_at, metadata
+            FROM {self.memory_table}
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT %s;
@@ -109,13 +105,12 @@ class MarketMemory:
             rows = self.db.cursor.fetchall()
             memories = []
             for row in rows:
-                mem_id, ag_id, step, content, embedding, created_at, metadata = row
-
+                mem_id, step, content, embedding, created_at, metadata = row
                 if isinstance(embedding, str):
                     embedding = [float(x) for x in embedding.strip('[]').split(',')]
                 mem = MemoryObject(
                     memory_id=UUID(mem_id),
-                    agent_id=ag_id,
+                    agent_id=self.agent_id,
                     cognitive_step=step,
                     content=content,
                     embedding=embedding,
@@ -129,20 +124,16 @@ class MarketMemory:
 
     def delete_memories(
         self,
-        agent_id: str,
         cognitive_step: Union[str, List[str], None] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
     ) -> int:
-        """
-        Delete memories filtered by optional parameters.
-        Returns the number of memories deleted.
-        """
+        """Delete memories from the agent's specific memory table."""
         self.db.connect()
 
-        conditions = ["agent_id = %s"]
-        params = [agent_id]
+        conditions = []
+        params = []
 
         if cognitive_step:
             if isinstance(cognitive_step, str):
@@ -167,10 +158,10 @@ class MarketMemory:
             conditions.append("created_at <= %s")
             params.append(end_time)
 
-        where_clause = " AND ".join(conditions)
+        where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
         try:
-            self.db.cursor.execute(f"DELETE FROM agent_memory WHERE {where_clause} RETURNING *;", tuple(params))
+            self.db.cursor.execute(f"DELETE FROM {self.memory_table} WHERE {where_clause} RETURNING *;", tuple(params))
             deleted_count = self.db.cursor.rowcount
             self.db.conn.commit()
             return deleted_count

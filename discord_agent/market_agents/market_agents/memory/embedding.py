@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 from dotenv import load_dotenv
@@ -80,10 +81,17 @@ class MemoryEmbedder:
                     response.raise_for_status()
                     all_embeddings.extend(response.json())
                     break
+                except requests.exceptions.HTTPError as http_err:
+                    print(f"HTTP error occurred: {http_err}")
+                    print(f"Response content: {response.content}")
+                    if attempt == self.config.retry_attempts - 1:
+                        raise
+                    time.sleep(self.config.retry_delay)
                 except Exception as e:
                     if attempt == self.config.retry_attempts - 1:
                         raise e
                     time.sleep(self.config.retry_delay)
+
         return all_embeddings
 
 if __name__ == "__main__":

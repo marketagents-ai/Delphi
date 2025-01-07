@@ -66,7 +66,6 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
 
             # Retrieve recent conversation from MarketMemory
             recent_interactions = memory_store.get_memories(
-                agent_id,
                 metadata_filters={'user_id': user_id},
                 cognitive_step="conversation",
                 limit=10
@@ -184,7 +183,6 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
 
             # Retrieve recent interactions
             recent_interactions = memory_store.get_memories(
-                agent_id,
                 metadata_filters={'user_id': user_id},
                 limit=10
             )
@@ -212,7 +210,8 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 if not knowledge_base:
                     raise ValueError("No knowledge_base provided for query_mode")
 
-                kb_results = memory_query.search_knowledge_base(user_message, top_k=10)
+                # NEW: Provide the KB's table_prefix to the memory_query
+                kb_results = memory_query.search_knowledge_base(knowledge_base.table_prefix, user_message, top_k=10)
                 # Add kb results as context
                 for i, res in enumerate(kb_results, 1):
                     chunk_text = f"[Repo Chunk {i} | Sim: {res.similarity:.3f}]\n{res.text}"
@@ -349,23 +348,23 @@ def truncate_middle(text, max_tokens=256):
     truncated_tokens = tokens[:side_tokens] + [tokenizer.encode('...')[0]] + tokens[-end_tokens:]
     return tokenizer.decode(truncated_tokens)
 
-def setup_bot():
+def setup_bot(persona=None):
     intents = discord.Intents.default()
     intents.message_content = True
     intents.members = True
     bot = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online)
 
     # Initialize MarketMemory & Query
-    config_path = os.path.join("market_agents/memory", "memory_config.yaml")
+    config_path = os.path.join("market_agents/market_agents/memory", "memory_config.yaml")
 
     config = load_config_from_yaml(config_path)
     db_conn = DatabaseConnection(config)
     db_conn.connect()
     embedding_service = MemoryEmbedder(config)
-    memory_store = MarketMemory(config, db_conn, embedding_service)
-    memory_query = MemoryRetriever(config, db_conn, embedding_service)
-    github_kb = GitHubKnowledgeBase(config, db_conn, embedding_service)
-
+    
+    # Pass the bot user ID (as agent_id) to MarketMemory so it uses agent-specific table
+    # For knowledge retrieval, just keep using MemoryRetriever
+    bot.memory_query = MemoryRetriever(config, db_conn, embedding_service)
 
     prompt_formats_path = os.path.join(script_dir, 'prompts', 'prompt_formats.yaml')
     system_prompts_path = os.path.join(script_dir, 'prompts', 'system_prompts.yaml')
@@ -376,12 +375,10 @@ def setup_bot():
     with open(system_prompts_path, 'r') as file:
         system_prompts = yaml.safe_load(file)
 
+    bot.persona = persona
     bot.persona_intensity = DEFAULT_PERSONA_INTENSITY
     bot.config = config
     bot.db_conn = db_conn
-    bot.memory_store = memory_store
-    bot.memory_query = memory_query
-    bot.github_kb = github_kb
     bot.prompt_formats = prompt_formats
     bot.system_prompts = system_prompts
     bot.message_processor = MessageProcessor(bot)
@@ -390,10 +387,17 @@ def setup_bot():
     @bot.event
     async def on_ready():
         logging.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-        
+
+        # Re-initialize MarketMemory now that we actually know the bot.user.id
+        bot.memory_store = MarketMemory(config, db_conn, embedding_service, agent_id=str(bot.user.id))
+
+        kb_name = "market_agents_github"
+
+        bot.github_kb = GitHubKnowledgeBase(config, db_conn, embedding_service, table_prefix=kb_name)
+
         # Check if repo is already indexed
-        bot.db_conn.cursor.execute("""
-            SELECT COUNT(*) FROM knowledge_objects 
+        bot.db_conn.cursor.execute(f"""
+            SELECT COUNT(*) FROM {kb_name}_knowledge_objects
             WHERE metadata->>'source' = 'github'
         """)
         count = bot.db_conn.cursor.fetchone()[0]
@@ -421,7 +425,7 @@ def setup_bot():
             'bot_id': bot.user.id
         })
         bot.message_processor.bot_id = str(bot.user.id)
-        await bot.message_processor.setup_agent()
+        await bot.message_processor.setup_agent(bot.persona)
 
     @bot.event
     async def on_message(message):
@@ -433,6 +437,7 @@ def setup_bot():
             await bot.invoke(ctx)
             return
 
+        # If the bot is directly mentioned or in DMs, we process the message
         if isinstance(message.channel, discord.DMChannel) or bot.user in message.mentions:
             if message.attachments:
                 attachment = message.attachments[0]
@@ -486,7 +491,6 @@ def setup_bot():
                     if decision.lower() == 'post':
                         await message.channel.send(response_content)
                         logging.info(f"Sent response based on accumulated messages in channel {channel_info['name']}")
-                        # Optionally store these interactions as well if needed.
                     else:
                         logging.info(f"Holding response for channel {channel_info['name']} based on decision: {decision}")
                 else:
@@ -533,9 +537,7 @@ def setup_bot():
     @bot.command(name='clear_memories')
     async def clear_memories(ctx):
         user_id = str(ctx.author.id)
-        agent_id = str(bot.user.id)
         deleted_count = bot.memory_store.delete_memories(
-            agent_id=agent_id,
             metadata_filters={'user_id': user_id}
         )
         await ctx.send(f"Cleared {deleted_count} memories.")
@@ -584,8 +586,6 @@ def setup_bot():
             )
         except Exception as e:
             await ctx.send(f"Error processing repo query: {str(e)}")
-
-
 
     return bot
 
