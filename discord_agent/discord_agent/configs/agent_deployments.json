@@ -2,11 +2,13 @@
     {
         "name": "tars_deployment",
         "module": {"name": "discord_agent"},
-        "worker_node_url": "http://node.naptha.ai:7001",
-        "agent_config": {
+        "node": {
+            "ip":"http://node.naptha.ai:7001"
+        },
+        "config": {
             "config_name": "agent_config_1",
             "llm_config": {"config_name": "model_2"},
-            "persona_module" : {"url": "https://huggingface.co/datasets/richardblythman/characterfile_richardblythman"},
+            "persona_module" : {"name": "tars_discord"},
             "system_prompt": {
                 "role": "You are a helpful AI assistant.",
                 "persona": ""
