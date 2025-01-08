@@ -2,7 +2,7 @@
     {
         "name": "tars_deployment",
         "module": {
-            "name": "Delphi",
+            "name": "delphi",
             "description": "TARS Discord Agent",
             "parameters": "{func_name: str, func_input_data: Union[list, str]}",
             "module_type": "agent",
