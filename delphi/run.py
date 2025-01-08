@@ -2,7 +2,7 @@
 from dotenv import load_dotenv
 from naptha_sdk.schemas import AgentRunInput
 from naptha_sdk.utils import get_logger #, sign_consumer_id
-from Delphi.schemas import InputSchema
+from delphi.schemas import InputSchema
 import asyncio
 
 # Import existing Discord bot functionality
@@ -17,9 +17,11 @@ class DiscordAgent:
         self.bot = None
         self.deployment = module_run.deployment
         self.persona = None
+        self.llm_config = None
         if self.deployment.config.persona_module and deployment.config.system_prompt["persona"]:
             self.persona = self.deployment.config.system_prompt["persona"]
-
+        if self.deployment.config.llm_config:
+            self.llm_config = self.deployment.config.llm_config
 
     async def start_bot(self, input_data):
         """Start the Discord bot using existing setup"""
@@ -36,7 +38,7 @@ class DiscordAgent:
         
 
             # Use existing setup_bot function
-            self.bot = setup_bot(persona=self.persona)
+            self.bot = setup_bot(persona=self.persona, llm_config=self.llm_config)
             await self.bot.start(token)
             
             # Keep running until stopped
@@ -78,7 +80,7 @@ if __name__ == "__main__":
     # Setup module deployment
     deployment = asyncio.run(setup_module_deployment(
         "agent",
-        "Delphi/configs/deployment.json",
+        "delphi/configs/deployment.json",
         node_url=os.getenv("NODE_URL"),
         load_persona_data=True
     ))

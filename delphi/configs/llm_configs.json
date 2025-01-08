@@ -8,11 +8,11 @@
         "api_base": "http://localhost:11434"
     },
     {
-        "config_name": "model_2",
+        "config_name": "gpt_4o",
         "client": "openai",
-        "model": "gpt-4o-mini",
-        "temperature": 0.7,
-        "max_tokens": 1000,
+        "model": "gpt-4o",
+        "temperature": 0.8,
+        "max_tokens": 4096,
         "api_base": "https://api.openai.com/v1"
     }
 ]

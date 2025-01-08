@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "discord-agent"
+name = "delphi"
 version = "0.1.0"
 description = ""
 authors = ["interstellarninja <ninjainterstellar@gmail.com>"]

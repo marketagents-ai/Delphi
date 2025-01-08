@@ -46,7 +46,7 @@ class MessageProcessor:
         else:
             raise ValueError("Bot user is not initialized")
 
-    async def setup_agent(self, persona=None):
+    async def setup_agent(self, persona=None, llm_config=None):
         """Initialize the TARS agent with persona and environment"""
         try:
             if persona:
@@ -88,13 +88,16 @@ class MessageProcessor:
                 max_steps=1000
             )
 
-            # Configure LLM using settings
-            llm_config = LLMConfig(
-                client=settings.llm_config.client,
-                model=settings.llm_config.model,
-                temperature=settings.llm_config.temperature,
-                max_tokens=settings.llm_config.max_tokens
-            )
+            if llm_config and isinstance(llm_config, dict):
+                llm_config = LLMConfig(**llm_config)
+            else:
+                # Configure LLM using settings
+                llm_config = LLMConfig(
+                    client=settings.llm_config.client,
+                    model=settings.llm_config.model,
+                    temperature=settings.llm_config.temperature,
+                    max_tokens=settings.llm_config.max_tokens
+                )
 
             # Create agent
             self.agent = MarketAgent.create(

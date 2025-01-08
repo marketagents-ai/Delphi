@@ -12,9 +12,9 @@ import nltk
 nltk.download('punkt', quiet=True)
 from nltk.tokenize import sent_tokenize
 
-from Delphi.bot_config import *
+from delphi.bot_config import *
 from market_agents.orchestrators.discord_orchestrator import MessageProcessor
-from Delphi.knowledge_base.github_kb import GitHubKnowledgeBase
+from delphi.knowledge_base.github_kb import GitHubKnowledgeBase
 
 from market_agents.memory.config import load_config_from_yaml
 from market_agents.memory.setup_db import DatabaseConnection
@@ -348,7 +348,7 @@ def truncate_middle(text, max_tokens=256):
     truncated_tokens = tokens[:side_tokens] + [tokenizer.encode('...')[0]] + tokens[-end_tokens:]
     return tokenizer.decode(truncated_tokens)
 
-def setup_bot(persona=None):
+def setup_bot(persona=None, llm_config=None):
     intents = discord.Intents.default()
     intents.message_content = True
     intents.members = True
@@ -375,6 +375,7 @@ def setup_bot(persona=None):
         system_prompts = yaml.safe_load(file)
 
     bot.persona = persona
+    bot.llm_config = llm_config
     bot.persona_intensity = DEFAULT_PERSONA_INTENSITY
     bot.config = config
     bot.db_conn = db_conn
@@ -424,7 +425,7 @@ def setup_bot(persona=None):
             'bot_id': bot.user.id
         })
         bot.message_processor.bot_id = str(bot.user.id)
-        await bot.message_processor.setup_agent(bot.persona)
+        await bot.message_processor.setup_agent(bot.persona, bot.llm_config)
 
     @bot.event
     async def on_message(message):

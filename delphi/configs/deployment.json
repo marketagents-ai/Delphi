@@ -2,7 +2,7 @@
     {
         "name": "tars_deployment",
         "module": {
-            "name": "discord_agent",
+            "name": "Delphi",
             "description": "TARS Discord Agent",
             "parameters": "{func_name: str, func_input_data: Union[list, str]}",
             "module_type": "agent",
@@ -15,7 +15,7 @@
         },
         "config": {
             "config_name": "agent_config_1",
-            "llm_config": {"config_name": "model_2"},
+            "llm_config": {"config_name": "gpt_4o"},
             "persona_module" : {"name": "tars_discord"},
             "system_prompt": {
                 "role": "You are a helpful AI assistant.",
