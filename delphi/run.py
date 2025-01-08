@@ -35,7 +35,6 @@ class DiscordAgent:
             token = input_data.get("discord_token")
             if not token:
                 raise ValueError("Discord token not provided in inputs")
-        
 
             # Use existing setup_bot function
             self.bot = setup_bot(persona=self.persona, llm_config=self.llm_config)

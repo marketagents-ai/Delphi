@@ -88,8 +88,16 @@ class MessageProcessor:
                 max_steps=1000
             )
 
-            if llm_config and isinstance(llm_config, dict):
-                llm_config = LLMConfig(**llm_config)
+            if llm_config:
+                llm_config = LLMConfig(
+                    client=llm_config.client.value,
+                    model=llm_config.model,
+                    temperature=llm_config.temperature,
+                    max_tokens=llm_config.max_tokens
+                )
+                
+                print(f"Setupbot llm config:\n{llm_config.model_dump_json()}")
+
             else:
                 # Configure LLM using settings
                 llm_config = LLMConfig(
