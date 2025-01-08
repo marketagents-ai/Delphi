@@ -2,7 +2,7 @@
 from dotenv import load_dotenv
 from naptha_sdk.schemas import AgentRunInput
 from naptha_sdk.utils import get_logger #, sign_consumer_id
-from discord_agent.schemas import InputSchema
+from Delphi.schemas import InputSchema
 import asyncio
 
 # Import existing Discord bot functionality
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     # Setup module deployment
     deployment = asyncio.run(setup_module_deployment(
         "agent",
-        "discord_agent/configs/deployment.json",
+        "Delphi/configs/deployment.json",
         node_url=os.getenv("NODE_URL"),
         load_persona_data=True
     ))

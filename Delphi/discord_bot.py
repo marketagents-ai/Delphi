@@ -12,9 +12,9 @@ import nltk
 nltk.download('punkt', quiet=True)
 from nltk.tokenize import sent_tokenize
 
-from discord_agent.bot_config import *
+from Delphi.bot_config import *
 from market_agents.orchestrators.discord_orchestrator import MessageProcessor
-from discord_agent.knowledge_base.github_kb import GitHubKnowledgeBase
+from Delphi.knowledge_base.github_kb import GitHubKnowledgeBase
 
 from market_agents.memory.config import load_config_from_yaml
 from market_agents.memory.setup_db import DatabaseConnection
