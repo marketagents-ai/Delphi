@@ -6,7 +6,7 @@
             "description": "TARS Discord Agent",
             "parameters": "{func_name: str, func_input_data: Union[list, str]}",
             "module_type": "agent",
-            "module_version": "v0.1",
+            "module_version": "v0.2",
             "module_entrypoint": "run.py",
             "execution_type": "package"
         },
