@@ -1,6 +1,6 @@
 bot:
   name: "TARS"
-  personas_dir: "./market_agents/agents/personas/generated_personas"
+  personas_dir: "./market_agents/market_agents/agents/personas/generated_personas"
 llm_config:
   client: "openai"
   model: "gpt-4o"
