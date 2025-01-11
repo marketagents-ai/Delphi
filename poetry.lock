@@ -1180,7 +1180,7 @@ pydantic = "*"
 
 [package.source]
 type = "directory"
-url = "market_agents"
+url = "delphi/market_agents"
 
 [[package]]
 name = "markupsafe"
@@ -2958,4 +2958,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<=3.13"
-content-hash = "a35dac4e79c8a723ae09e2c0868a0eeddac5eca73d08fe80f5b97f4589cd668a"
+content-hash = "5e127f6f7b8736e7bda4559bad28d26370dd1fefcbea4be9991270d41cc61f1c"

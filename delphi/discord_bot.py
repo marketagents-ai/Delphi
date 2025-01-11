@@ -357,7 +357,7 @@ def setup_bot(persona=None, llm_config=None):
     bot = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online)
 
     # Initialize MarketMemory & Query
-    config_path = os.path.join("market_agents/market_agents/memory", "memory_config.yaml")
+    config_path = os.path.join("delphi/market_agents/market_agents/memory", "memory_config.yaml")
 
     config = load_config_from_yaml(config_path)
     db_conn = DatabaseConnection(config)
