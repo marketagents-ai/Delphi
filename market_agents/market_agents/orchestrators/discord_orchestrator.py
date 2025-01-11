@@ -17,7 +17,8 @@ from market_agents.environments.mechanisms.discord import (
     DiscordMechanism,
     DiscordActionSpace,
     DiscordObservationSpace,
-    DiscordAutoMessage
+    DiscordAutoMessage,
+    ChannelSummary
 )
 
 import discord
@@ -172,14 +173,20 @@ class MessageProcessor:
 
             # Action Generation
             action_schema = None
-            if message_type and message_type == "auto":
-                action_schema = DiscordAutoMessage.model_json_schema()
+            if message_type:
+                if message_type == "auto":
+                    action_schema = DiscordAutoMessage.model_json_schema()
+                elif message_type == "summary":
+                    action_schema = ChannelSummary.model_json_schema()
+
             action_result = await self.agent.generate_action(
                 'discord', 
                 perception=perception_result,
                 action_schema=action_schema
             )
-            if message_type and message_type == "auto":
+            if not self.agent.last_action:
+                self.agent.last_action = action_result
+            if message_type:
                 action_result = {
                     "agent_id": self.bot_id,
                     "action": action_result
