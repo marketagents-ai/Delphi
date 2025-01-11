@@ -9,6 +9,8 @@ from datetime import datetime
 from collections import defaultdict, Counter
 import yaml
 import nltk
+
+from delphi.tools.discord_summarizer import ChannelSummarizer
 nltk.download('punkt', quiet=True)
 from nltk.tokenize import sent_tokenize
 
@@ -588,6 +590,29 @@ def setup_bot(persona=None, llm_config=None):
             )
         except Exception as e:
             await ctx.send(f"Error processing repo query: {str(e)}")
+
+    @bot.command(name='summarize')
+    async def summarize_channel(ctx):
+        """
+        Summarize the messages in the current channel.
+        Usage: !summarize
+        """
+        try:
+            summarizer = ChannelSummarizer(
+                bot=bot,
+                prompt_formats=bot.prompt_formats,
+                system_prompts=bot.system_prompts,
+                max_entries=100
+            )
+
+            summary_text = await summarizer.summarize_channel(ctx)
+            
+            await send_long_message(ctx.channel, summary_text)
+
+        except Exception as e:
+            await ctx.send(f"Error summarizing channel: {str(e)}")
+
+
 
     return bot
 
