@@ -39,6 +39,15 @@ class DiscordMessage(BaseModel):
         description="The message content for TARS bot to send to Discord. Include markdown block and formatting if type is markdown."
     )
 
+class ChannelSummary(BaseModel):
+    """
+    Schema for a channel summary as a list of bullet points.
+    """
+    key_points: List[str] = Field(
+        default_factory=list,
+        description="List of bullet points for the channel summary. Each item is a short string capturing a key point."
+    )
+
 class DiscordAction(LocalAction):
     action: DiscordMessage
 
