@@ -6,7 +6,7 @@ from delphi.schemas import InputSchema
 import asyncio
 
 # Import existing Discord bot functionality
-from discord_bot import setup_bot
+from delphi.discord_bot import setup_bot
 
 load_dotenv()
 logger = get_logger(__name__)

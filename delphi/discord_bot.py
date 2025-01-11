@@ -70,7 +70,7 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
             recent_interactions = memory_store.get_memories(
                 metadata_filters={'user_id': user_id},
                 cognitive_step="conversation",
-                limit=10
+                limit=5
             )
             print("\nMemory Search Result:")
             memory_strings = [f"Memory {i+1}:\n{mem.content}" for i, mem in enumerate(recent_interactions)]

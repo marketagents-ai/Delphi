@@ -131,8 +131,19 @@ class DatabaseConnection:
             raise e
         
     def ensure_connection(self):
-        """Ensure database connection is active, reconnect if needed"""
+        """Ensure database connection and cursor are active."""
         try:
+            # Reconnect if connection is closed
+            if not self.conn or self.conn.closed != 0:
+                self.connect()
+            # Reinitialize cursor if closed
+            if not self.cursor or self.cursor.closed:
+                self.cursor = self.conn.cursor()
+            # Validate connection with a simple query
             self.cursor.execute("SELECT 1")
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            # Handle reconnection and cursor recreation on failure
             self.connect()
+            self.cursor = self.conn.cursor()
+            logging.warning(f"Reconnected to the database due to: {e}")
+
