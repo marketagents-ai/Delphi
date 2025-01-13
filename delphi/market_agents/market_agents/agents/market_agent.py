@@ -70,6 +70,16 @@ class MarketAgent(LLMAgent):
 
         environment_info = self.environments[environment_name].get_global_state()
         stm_cognitive = await self.short_term_memory.retrieve_recent_memories(limit=5)
+        short_term_memories = []
+        for mem in stm_cognitive:
+            short_term_memories.append({
+                "cognitive_step": mem.cognitive_step,
+                "content": mem.content
+            })
+
+        print("\nCognitive Memory Results:")
+        memory_strings = [f"Memory {i+1}:\n{mem}" for i, mem in enumerate(short_term_memories)]
+        print("\033[94m" + "\n\n".join(memory_strings) + "\033[0m")
 
         task_str = f"Task: {self.task}" if self.task else ""
         env_state_str = f"Environment state: {str(environment_info)}" if environment_info else ""
@@ -81,10 +91,14 @@ class MarketAgent(LLMAgent):
              top_k=2
         )
 
+        print("\nEpisodic Memory Results:")
+        memory_strings = [f"Memory {i+1}:\n{mem.dict()}" for i, mem in enumerate(ltm_episodes)]
+        print("\033[94m" + "\n\n".join(memory_strings) + "\033[0m")
+
         variables = AgentPromptVariables(
             environment_name=environment_name,
             environment_info=environment_info,
-            short_term_memory=[mem.dict() for mem in stm_cognitive],
+            short_term_memory=short_term_memories,
             long_term_memory=[episode.dict() for episode in ltm_episodes],
         )
 
@@ -231,9 +245,9 @@ class MarketAgent(LLMAgent):
         if previous_reflection:
             last_reflection_obj = previous_reflection[0]
             previous_strategy = last_reflection_obj.metadata.get("strategy_update", "")
-            if isinstance(previous_strategy_val, list):
-                previous_strategy_val = " ".join(previous_strategy_val)
-                
+            if isinstance(previous_strategy, list):
+                previous_strategy = " ".join(previous_strategy)
+
         variables = AgentPromptVariables(
             environment_name=environment_name,
             environment_info=environment_info,
@@ -278,20 +292,18 @@ class MarketAgent(LLMAgent):
             )
 
             self.episode_steps.append(reflection_mem)
-            asyncio.create_task(self.short_term_memory.store_memory(reflection_mem))
+            await self.short_term_memory.store_memory(reflection_mem)
 
             task_str = f"Task: {self.task}" if self.task else ""
             env_state_str = f"Environment state: {str(environment_info)}" if environment_info else ""
             query_str = (task_str + "\n" + env_state_str).strip()
-            asyncio.create_task(self.long_term_memory.store_episodic_memory(
+            await self.long_term_memory.store_episodic_memory(
                 agent_id=self.id,
                 task_query=query_str,
                 steps=self.episode_steps,
                 total_reward=round(total_reward_val),
                 strategy_update=response.get("strategy_update", ""),
                 metadata=None
-            ))
+            )
             self.episode_steps.clear()
-            return response.get("reflection", "")
-        else:
-            return response
+        return response

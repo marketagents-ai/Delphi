@@ -49,6 +49,7 @@ class EpisodicMemoryObject(BaseModel):
     embedding: Optional[List[float]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     metadata: Optional[Dict[str, Any]] = None
+    similarity: Optional[float] = None
 
 
 class CognitiveMemory:
@@ -544,12 +545,25 @@ class LongTermMemory(BaseModel):
         """
         The synchronous logic that builds EpisodicMemoryObject and calls store_episode(...).
         """
+
         csteps = []
         for step in steps:
+            raw_content = (step.content or "").strip()
+            try:
+                if not raw_content:
+                    parsed_content = {}
+                else:
+                    parsed_content = json.loads(raw_content)
+
+                if not isinstance(parsed_content, dict):
+                    parsed_content = {}
+            except (json.JSONDecodeError, TypeError):
+                parsed_content = {}
+
             csteps.append(
                 CognitiveStep(
                     step_type=step.cognitive_step,
-                    content=json.loads(step.content) if step.content else {}
+                    content=parsed_content
                 )
             )
 
@@ -562,6 +576,7 @@ class LongTermMemory(BaseModel):
             metadata=metadata
         )
         self.episodic_store.store_episode(episode)
+
 
     async def retrieve_episodic_memories(
         self,
@@ -592,7 +607,8 @@ class LongTermMemory(BaseModel):
                 total_reward=content_dict.get("total_reward"),
                 strategy_update=content_dict.get("strategy_update"),
                 created_at=datetime.utcnow(),
-                metadata=content_dict.get("metadata", {})
+                metadata=content_dict.get("metadata", {}),
+                similarity=round(memory_item.similarity, 2)
             )
             episodes.append(eobj)
 
