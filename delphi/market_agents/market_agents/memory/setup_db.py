@@ -51,6 +51,21 @@ class DatabaseConnection:
             print(f"Error ensuring database exists: {e}")
             raise
 
+    def ensure_connection(self):
+        """Ensure database connection and cursor are active."""
+        try:
+            # Reconnect if connection is closed
+            if not self.conn or self.conn.closed != 0:
+                self.connect()
+            # Reinitialize cursor if closed
+            if not self.cursor or self.cursor.closed:
+                self.cursor = self.conn.cursor()
+            # Validate connection with a simple query
+            self.cursor.execute("SELECT 1")
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            self.connect()
+            self.cursor = self.conn.cursor()
+
     def create_knowledge_base_tables(self, base_name: str):
         """Create separate tables for a specific knowledge base."""
         self.connect()
@@ -87,13 +102,16 @@ class DatabaseConnection:
 
         self.conn.commit()
 
-    def create_agent_memory_table(self, agent_id: str):
-        """Create a separate memory table for a specific agent."""
+    def create_agent_cognitive_memory_table(self, agent_id: str):
+        """
+        Create a separate cognitive memory table for a specific agent.
+        This can store single-step or short-horizon items (akin to 'STM').
+        """
         self.connect()
-        agent_memory_table = f"agent_{agent_id}_memory"
+        cognitive_table = f"agent_{agent_id}_cognitive"
 
         self.cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {agent_memory_table} (
+            CREATE TABLE IF NOT EXISTS {cognitive_table} (
                 memory_id UUID PRIMARY KEY,
                 cognitive_step TEXT,
                 content TEXT,
@@ -103,47 +121,74 @@ class DatabaseConnection:
             );
         """)
 
-        index_name = f"agent_{agent_id}_memory_index"
-
+        index_name = f"agent_{agent_id}_cognitive_index"
         self.cursor.execute(f"""
             CREATE INDEX IF NOT EXISTS {index_name}
-            ON {agent_memory_table} USING ivfflat (embedding vector_cosine_ops)
+            ON {cognitive_table} USING ivfflat (embedding vector_cosine_ops)
             WITH (lists = {self.config.lists});
         """)
 
         self.conn.commit()
 
-
-    def init_agent_memory(self, agent_ids: list):
-        """Initialize memory tables for multiple agents."""
+    def init_agent_cognitive_memory(self, agent_ids: list):
+        """Initialize cognitive memory tables for multiple agents."""
         for agent_id in agent_ids:
-            self.create_agent_memory_table(agent_id)
+            self.create_agent_cognitive_memory_table(agent_id)
 
-    def clear_agent_memory(self, agent_id: str):
-        """Clear all memory entries for a specific agent."""
+    def clear_agent_cognitive_memory(self, agent_id: str):
+        """Clear all cognitive memory entries for a specific agent."""
         self.connect()
-        agent_memory_table = f"agent_{agent_id}_memory"
+        cognitive_table = f"agent_{agent_id}_cognitive"
         try:
-            self.cursor.execute(f"TRUNCATE TABLE {agent_memory_table};")
+            self.cursor.execute(f"TRUNCATE TABLE {cognitive_table};")
             self.conn.commit()
         except Exception as e:
             self.conn.rollback()
             raise e
-        
-    def ensure_connection(self):
-        """Ensure database connection and cursor are active."""
-        try:
-            # Reconnect if connection is closed
-            if not self.conn or self.conn.closed != 0:
-                self.connect()
-            # Reinitialize cursor if closed
-            if not self.cursor or self.cursor.closed:
-                self.cursor = self.conn.cursor()
-            # Validate connection with a simple query
-            self.cursor.execute("SELECT 1")
-        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-            # Handle reconnection and cursor recreation on failure
-            self.connect()
-            self.cursor = self.conn.cursor()
-            logging.warning(f"Reconnected to the database due to: {e}")
 
+    def create_agent_episodic_memory_table(self, agent_id: str):
+        """
+        Create a separate episodic memory table for a specific agent.
+        Each row will store an entire 'episode' (cognitive_steps in JSON),
+        plus other relevant episodic info (task_query, total_reward, etc.).
+        """
+        self.connect()
+        episodic_table = f"agent_{agent_id}_episodic"
+
+        self.cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {episodic_table} (
+                memory_id UUID PRIMARY KEY,
+                task_query TEXT,
+                cognitive_steps JSONB,
+                total_reward DOUBLE PRECISION,
+                strategy_update JSONB,
+                embedding vector({self.config.vector_dim}),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                metadata JSONB DEFAULT '{{}}'::jsonb
+            );
+        """)
+
+        index_name = f"agent_{agent_id}_episodic_index"
+        self.cursor.execute(f"""
+            CREATE INDEX IF NOT EXISTS {index_name}
+            ON {episodic_table} USING ivfflat (embedding vector_cosine_ops)
+            WITH (lists = {self.config.lists});
+        """)
+
+        self.conn.commit()
+
+    def init_agent_episodic_memory(self, agent_ids: list):
+        """Initialize episodic memory tables for multiple agents."""
+        for agent_id in agent_ids:
+            self.create_agent_episodic_memory_table(agent_id)
+
+    def clear_agent_episodic_memory(self, agent_id: str):
+        """Clear all episodic (long-horizon) memory entries for a specific agent."""
+        self.connect()
+        episodic_table = f"agent_{agent_id}_episodic"
+        try:
+            self.cursor.execute(f"TRUNCATE TABLE {episodic_table};")
+            self.conn.commit()
+        except Exception as e:
+            self.conn.rollback()
+            raise e

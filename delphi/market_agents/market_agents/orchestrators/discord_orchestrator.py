@@ -3,15 +3,14 @@ import os
 import yaml
 import logging
 import json
-from pathlib import Path
-from dotenv import load_dotenv
 import asyncio
 
-from market_agents.memory.memory import MemoryObject
-from market_agents.orchestrators.config import settings
+from pathlib import Path
+from dotenv import load_dotenv
+
 from market_agents.agents.market_agent import MarketAgent
-from market_agents.inference.message_models import LLMConfig
 from market_agents.agents.personas.persona import Persona
+from market_agents.inference.message_models import LLMConfig
 from market_agents.environments.environment import MultiAgentEnvironment
 from market_agents.environments.mechanisms.discord import (
     DiscordMechanism,
@@ -21,16 +20,8 @@ from market_agents.environments.mechanisms.discord import (
     ChannelSummary
 )
 
-import discord
+from market_agents.orchestrators.config import settings
 
-# Load environment variables
-load_dotenv()
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 class MessageProcessor:
@@ -41,14 +32,17 @@ class MessageProcessor:
         self.environment = None
 
     async def initialize_bot_id(self):
-        """Initialize bot_id once the bot is ready"""
+        """Initialize bot_id once the bot is ready."""
         if self.bot.user:
             self.bot_id = str(self.bot.user.id)
         else:
             raise ValueError("Bot user is not initialized")
 
     async def setup_agent(self, persona=None, llm_config=None):
-        """Initialize the TARS agent with persona and environment"""
+        """
+        Initialize the TARS agent with persona and environment.
+        Must include memory_config & db_conn to MarketAgent.create.
+        """
         try:
             if persona:
                 if isinstance(persona, dict):
@@ -60,12 +54,11 @@ class MessageProcessor:
                 else:
                     agent_persona = persona
             else:
-                 # Load the specific persona file for the configured bot
+                # Load the specific persona file for the configured bot
                 persona_file = settings.bot.personas_dir / f"{settings.bot.name.lower()}.yaml"
                 if not persona_file.exists():
                     raise ValueError(f"Persona file for {settings.bot.name} not found at {persona_file}")
 
-                # Load the specific persona
                 with open(persona_file, 'r') as file:
                     persona_data = yaml.safe_load(file)
                     agent_persona = Persona(
@@ -79,7 +72,7 @@ class MessageProcessor:
                         skills=persona_data['skills']
                     )
 
-            # Create Discord environment
+            # Create a Discord environment
             discord_mechanism = DiscordMechanism()
             self.environment = MultiAgentEnvironment(
                 name="DiscordEnvironment",
@@ -89,6 +82,7 @@ class MessageProcessor:
                 max_steps=1000
             )
 
+            # LLMConfig
             if llm_config:
                 llm_config = LLMConfig(
                     client=llm_config.client.value,
@@ -96,11 +90,9 @@ class MessageProcessor:
                     temperature=llm_config.temperature,
                     max_tokens=llm_config.max_tokens
                 )
-                
                 print(f"Setupbot llm config:\n{llm_config.model_dump_json()}")
-
             else:
-                # Configure LLM using settings
+                # Use defaults from your settings
                 llm_config = LLMConfig(
                     client=settings.llm_config.client,
                     model=settings.llm_config.model,
@@ -108,8 +100,10 @@ class MessageProcessor:
                     max_tokens=settings.llm_config.max_tokens
                 )
 
-            # Create agent
+            # Create the MarketAgent
             self.agent = MarketAgent.create(
+                memory_config=self.bot.config,
+                db_conn=self.bot.db_conn,
                 agent_id=self.bot_id,
                 use_llm=True,
                 llm_config=llm_config,
@@ -126,7 +120,13 @@ class MessageProcessor:
             return False
 
     async def process_messages(self, channel_info, messages, message_type=None, user_info=None):
-        """Process messages through the agent's cognitive functions"""
+        """
+        Process messages through the agent's built-in cognitive pipeline:
+          - Perceive
+          - Generate Action
+          - Reflect
+        The agent stores memory automatically, so we don't manually store steps.
+        """
         try:
             if not messages:
                 logger.warning("No messages to process")
@@ -150,61 +150,36 @@ class MessageProcessor:
                     'user_id': user_info['user_id'],
                     'user_name': user_info['user_name']
                 })
-            
-            # Run cognitive functions
-            logger.info("Starting agent cognitive functions")
 
-            # Perception
+            # If message_type == "auto", call perceive
             perception_result = None
-            if message_type and message_type == "auto":
+            if message_type == "auto":
                 perception_result = await self.agent.perceive('discord')
                 logger.info("Perception completed")
                 print("\nPerception Result:")
                 print("\033[94m" + json.dumps(perception_result, indent=2) + "\033[0m")
-                
-                # Store perception in memory
-                if perception_result:
-                    self.bot.memory_store.store_memory(MemoryObject(
-                        agent_id=self.bot_id,
-                        cognitive_step="perception",
-                        content=json.dumps(perception_result),
-                        metadata=metadata
-                    ))
 
-            # Action Generation
+            # Generate action
             action_schema = None
-            if message_type:
-                if message_type == "auto":
-                    action_schema = DiscordAutoMessage.model_json_schema()
-                elif message_type == "summary":
-                    action_schema = ChannelSummary.model_json_schema()
+            if message_type == "auto":
+                action_schema = DiscordAutoMessage.model_json_schema()
+            elif message_type == "summary":
+                action_schema = ChannelSummary.model_json_schema()
 
             action_result = await self.agent.generate_action(
-                'discord', 
+                environment_name='discord',
                 perception=perception_result,
+                return_prompt=False,
+                structured_tool=False,
                 action_schema=action_schema
+                
             )
-            if not self.agent.last_action:
-                self.agent.last_action = action_result
-            if message_type:
-                action_result = {
-                    "agent_id": self.bot_id,
-                    "action": action_result
-                }
-            logger.info("Action generation completed")
-            print("\nAction Result:")
-            print("\033[92m" + json.dumps(action_result, indent=2) + "\033[0m")
-
-            # Store action in memory
             if action_result:
-                self.bot.memory_store.store_memory(MemoryObject(
-                    agent_id=self.bot_id,
-                    cognitive_step="action",
-                    content=json.dumps(action_result),
-                    metadata=metadata
-                ))
+                logger.info("Action generation completed")
+                print("\nAction Result:")
+                print("\033[92m" + json.dumps(action_result, indent=2) + "\033[0m")
 
-            # Update environment state with action result
+            # Update environment with the action results
             if action_result:
                 self.environment.mechanism.update_state({
                     "bot_id": self.bot_id,
@@ -214,17 +189,15 @@ class MessageProcessor:
                     "last_action": action_result
                 })
 
-            # Create task for reflection to run in parallel
-            reflection_task = asyncio.create_task(self._run_reflection(metadata))
+            # Reflection runs in parallel
+            reflection_task = asyncio.create_task(self._run_reflection())
 
-            # Return action result immediately
             response = {
                 "perception": perception_result,
                 "action": action_result,
                 "reflection": None
             }
 
-            # Clear messages from mechanism after processing core functions
             self.environment.mechanism.messages = []
             logger.info("Cleared messages from mechanism")
 
@@ -234,104 +207,14 @@ class MessageProcessor:
             logger.error(f"Error processing messages: {str(e)}", exc_info=True)
             return None
 
-    async def _run_reflection(self, metadata):
-        """Run reflection as a separate async task"""
+    async def _run_reflection(self):
+        """Runs reflection as a separate async step. The agent automatically stores memory."""
         try:
-            # Reflection
             reflection_result = await self.agent.reflect('discord')
             logger.info("Reflection completed")
             print("\nReflection Result:")
             print("\033[93m" + json.dumps(reflection_result, indent=2) + "\033[0m")
-
-            # Store reflection in memory
-            if reflection_result:
-                self.bot.memory_store.store_memory(MemoryObject(
-                    agent_id=self.bot_id,
-                    cognitive_step="reflection",
-                    content=json.dumps(reflection_result),
-                    metadata=metadata
-                ))
-
             return reflection_result
-
         except Exception as e:
             logger.error(f"Error during reflection: {str(e)}", exc_info=True)
             return None
-
-async def run_bot():
-    """Run the Discord bot and process messages once connected."""
-    # Create a Discord client
-    intents = discord.Intents.default()
-    intents.messages = True
-    intents.guilds = True
-    client = discord.Client(intents=intents)
-
-    # Initialize the message processor with the client (bot)
-    processor = MessageProcessor(client)
-    processing_done = asyncio.Event()
-
-    @client.event
-    async def on_ready():
-        logger.info(f'Logged in as {client.user.name} (ID: {client.user.id})')
-
-        await processor.initialize_bot_id()
-        success = await processor.setup_agent()
-
-        if not success:
-            logger.error("Failed to set up agent")
-            processing_done.set()
-            return
-
-        # Get the channel to test with
-        channel = client.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
-
-        if channel:
-            # Get channel info
-            channel_info = {
-                "id": str(channel.id),
-                "name": channel.name
-            }
-            
-            # Fetch messages
-            messages = []
-            async for msg in channel.history(limit=10):
-                messages.append({
-                    "content": msg.content,
-                    "author_id": str(msg.author.id),
-                    "author_name": msg.author.name,
-                    "timestamp": msg.created_at.isoformat()
-                })
-            
-            print(f"Discord messages: {messages}")
-
-            # Process the messages
-            results = await processor.process_messages(channel_info, messages, message_type="auto")
-            
-            if results:
-                logger.info("Message processing test completed successfully")
-            else:
-                logger.error("Message processing test failed")
-        else:
-            logger.error("Channel not found")
-
-        # Signal that processing is done
-        processing_done.set()
-
-    # Get Discord token
-    token = os.getenv('DISCORD_TOKEN')
-    if not token:
-        logger.error("Discord token not found in environment variables")
-        return
-
-    # Run the bot
-    await client.start(token)
-
-    # Wait until processing is done
-    await processing_done.wait()
-
-    # Close the bot connection
-    await client.close()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(run_bot())

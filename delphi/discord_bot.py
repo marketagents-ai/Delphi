@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 
@@ -21,7 +22,8 @@ from delphi.knowledge_base.github_kb import GitHubKnowledgeBase
 from market_agents.memory.config import load_config_from_yaml
 from market_agents.memory.setup_db import DatabaseConnection
 from market_agents.memory.embedding import MemoryEmbedder
-from market_agents.memory.memory import MarketMemory, MemoryObject
+# Use ShortTermMemory (or also LongTermMemory if you want episodic storage)
+from market_agents.memory.memory import MemoryObject, ShortTermMemory
 from market_agents.memory.vector_search import MemoryRetriever
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,10 +68,10 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
                 "user_name": user_name
             }
 
-            # Retrieve recent conversation from MarketMemory
-            recent_interactions = memory_store.get_memories(
-                metadata_filters={'user_id': user_id},
+            # Retrieve recent conversation from ShortTermMemory
+            recent_interactions = await memory_store.retrieve_recent_memories(
                 cognitive_step="conversation",
+                metadata_filters={'user_id': user_id},
                 limit=5
             )
             print("\nMemory Search Result:")
@@ -80,7 +82,6 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
             for interaction in recent_interactions:
                 # Parse the JSON content string
                 conversation = json.loads(interaction.content)
-                
                 if 'user_message' in conversation:
                     messages.append({
                         'content': conversation['user_message'],
@@ -118,8 +119,9 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
                 channel_info=channel_info,
                 messages=messages,
                 message_type=None,
-                user_info=user_info)
-            
+                user_info=user_info
+            )
+
             action_result = result.get('action')
 
             if action_result and action_result.get('content'):
@@ -127,12 +129,13 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
                 await send_long_message(message.channel, response_content)
                 logging.info(f"Sent response to {user_name} (ID: {user_id}): {response_content[:1000] if response_content else ''}")
 
-                # Store interaction as conversation step
+                # Store interaction as conversation step in short-term memory
                 conversation_record = {
                     "user_message": content,
                     "ai_response": response_content
                 }
-                memory_store.store_memory(MemoryObject(
+                
+                asyncio.create_task(memory_store.store_memory(MemoryObject(
                     agent_id=agent_id,
                     cognitive_step="conversation",
                     content=json.dumps(conversation_record),
@@ -140,7 +143,7 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
                         'user_id': user_id,
                         'user_name': user_name
                     }
-                ))
+                )))
 
                 log_to_jsonl({
                     'event': 'conversation',
@@ -184,9 +187,9 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
             }
 
             # Retrieve recent interactions
-            recent_interactions = memory_store.get_memories(
-                metadata_filters={'user_id': user_id},
-                limit=10
+            recent_interactions = memory_store.retrieve_recent_memories(
+                limit=10,
+                metadata_filters={'user_id': user_id}
             )
 
             messages = []
@@ -212,7 +215,7 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 if not knowledge_base:
                     raise ValueError("No knowledge_base provided for query_mode")
 
-                # NEW: Provide the KB's table_prefix to the memory_query
+                # Provide the KB's table_prefix to the memory_query
                 kb_results = memory_query.search_knowledge_base(knowledge_base.table_prefix, user_message, top_k=10)
                 # Add kb results as context
                 for i, res in enumerate(kb_results, 1):
@@ -223,7 +226,7 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                         'author_name': 'SystemContext',
                         'timestamp': message.created_at.isoformat()
                     })
-                
+
                 content = user_message
             else:
                 # File mode
@@ -256,7 +259,7 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 await send_long_message(message.channel, response_content)
                 logging.info(f"Sent response to {user_name} (ID: {user_id}): {response_content[:1000]}...")
 
-                # Store interaction
+                # Store interaction in short-term memory
                 conversation_record = {
                     "user_message": content,
                     "ai_response": response_content
@@ -356,16 +359,21 @@ def setup_bot(persona=None, llm_config=None):
     intents.members = True
     bot = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online)
 
-    # Initialize MarketMemory & Query
+    # Initialize config and DB
     config_path = os.path.join("delphi/market_agents/market_agents/memory", "memory_config.yaml")
-
     config = load_config_from_yaml(config_path)
     db_conn = DatabaseConnection(config)
     db_conn.connect()
     embedding_service = MemoryEmbedder(config)
     
-    bot.memory_store = MarketMemory(config, db_conn, embedding_service, agent_id="discord_agent")
+    # 1) Short-term memory
+    bot.memory_store = ShortTermMemory(config, db_conn, agent_id="discord_agent")
+
+    # 2) For knowledge base or agent memory queries
     bot.memory_query = MemoryRetriever(config, db_conn, embedding_service)
+
+    from market_agents.orchestrators.discord_orchestrator import MessageProcessor
+    bot.message_processor = MessageProcessor(bot)
 
     prompt_formats_path = os.path.join(script_dir, 'prompts', 'prompt_formats.yaml')
     system_prompts_path = os.path.join(script_dir, 'prompts', 'system_prompts.yaml')
@@ -390,11 +398,10 @@ def setup_bot(persona=None, llm_config=None):
     async def on_ready():
         logging.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
 
-        # Re-initialize MarketMemory now that we actually know the bot.user.id
-        bot.memory_store = MarketMemory(config, db_conn, embedding_service, agent_id=str(bot.user.id))
+        # Re-initialize short-term memory with the actual bot ID (optional)
+        bot.memory_store = ShortTermMemory(config, db_conn, agent_id=str(bot.user.id))
 
         kb_name = "market_agents_github"
-
         bot.github_kb = GitHubKnowledgeBase(config, db_conn, embedding_service, table_prefix=kb_name)
 
         # Check if repo is already indexed
@@ -441,7 +448,7 @@ def setup_bot(persona=None, llm_config=None):
             await bot.invoke(ctx)
             return
 
-        # If the bot is directly mentioned or in DMs, we process the message
+        # If the bot is directly mentioned or in DMs, process the message
         if isinstance(message.channel, discord.DMChannel) or bot.user in message.mentions:
             if message.attachments:
                 attachment = message.attachments[0]
@@ -466,7 +473,7 @@ def setup_bot(persona=None, llm_config=None):
                     bot=bot
                 )
         else:
-            # Auto message accumulation can remain if desired, or removed if not needed
+            # Automatic message accumulation can remain if desired
             channel_id = message.channel.id
             if channel_id not in bot.message_cache:
                 bot.message_cache[channel_id] = []
@@ -486,8 +493,12 @@ def setup_bot(persona=None, llm_config=None):
                     "id": str(message.channel.id),
                     "name": message.channel.name
                 }
-                # This is optional. If we want to store these auto messages as well, we could do similar steps.
-                results = await bot.message_processor.process_messages(channel_info, bot.message_cache[channel_id], message_type="auto")
+                # This is optional. If we want to store auto messages as well, we could do so.
+                results = await bot.message_processor.process_messages(
+                    channel_info, 
+                    bot.message_cache[channel_id], 
+                    message_type="auto"
+                )
                 action_result = results.get('action')
                 if action_result and action_result.get('content'):
                     decision = action_result['content'].get('decision', 'hold')
@@ -520,7 +531,7 @@ def setup_bot(persona=None, llm_config=None):
         user_id = str(ctx.author.id)
         agent_id = str(bot.user.id)
         
-        bot.memory_store.store_memory(MemoryObject(
+        await bot.memory_store.store_memory(MemoryObject(
             agent_id=agent_id,
             cognitive_step="remember",
             content=memory_text,
@@ -541,7 +552,7 @@ def setup_bot(persona=None, llm_config=None):
     @bot.command(name='clear_memories')
     async def clear_memories(ctx):
         user_id = str(ctx.author.id)
-        deleted_count = bot.memory_store.delete_memories(
+        deleted_count = await bot.memory_store.cognitive_memory.delete_cognitive_items(
             metadata_filters={'user_id': user_id}
         )
         await ctx.send(f"Cleared {deleted_count} memories.")
@@ -606,13 +617,10 @@ def setup_bot(persona=None, llm_config=None):
             )
 
             summary_text = await summarizer.summarize_channel(ctx)
-            
             await send_long_message(ctx.channel, summary_text)
 
         except Exception as e:
             await ctx.send(f"Error summarizing channel: {str(e)}")
-
-
 
     return bot
 

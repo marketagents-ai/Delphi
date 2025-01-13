@@ -171,10 +171,10 @@ class SemanticChunker(KnowledgeChunker):
 
 if __name__ == "__main__":
     import os
-    from market_agents.memory.config import load_config_from_yaml
-    from market_agents.memory.knowledge_base import MarketKnowledgeBase
-    from market_agents.memory.embedding import MemoryEmbedder
-    from market_agents.memory.setup_db import DatabaseConnection
+    from config import load_config_from_yaml
+    from knowledge_base import MarketKnowledgeBase
+    from embedding import MemoryEmbedder
+    from setup_db import DatabaseConnection
 
     # Load configuration and initialize services
     current_dir = os.path.dirname(os.path.abspath(__file__))
