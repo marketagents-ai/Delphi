@@ -223,14 +223,13 @@ class ChannelSummarizer:
                 message_type="summary",
                 user_info=user_info
             )
-            
-            print(result)
 
             action_result = result.get("action")
-            
 
-            if action_result and action_result.get("action"):
-                content = action_result["action"].get("content", {})
+            print("Action result:", action_result)
+
+            if action_result:
+                content = action_result.get("content", {})
                 key_points = content.get("key_points", [])
                 return key_points
             else:
