@@ -17,10 +17,11 @@ retry_attempts: 3
 retry_delay: 1.0
 min_chunk_size: 256
 max_chunk_size: 1024
-#vector_dim: 1536 #openai embed dim
+# vector_dim: 1536 #openai embed dim
 vector_dim: 768
-context_window: 512
+max_input: 4096
 top_k: 3
 similarity_threshold: 0.7
 encoding_format: "float"
 embedding_provider: "tei"
+#embedding_provider: "openai"

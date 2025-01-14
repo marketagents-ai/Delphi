@@ -9,17 +9,23 @@ class DatabaseConnection:
         self.cursor = None
 
     def connect(self):
-        """Establish a connection to the database."""
-        if not self.conn:
-            self._ensure_database_exists()
+        """Establish a new connection if needed"""
+        if self.conn is None or (hasattr(self.conn, 'closed') and self.conn.closed):
             self.conn = psycopg2.connect(
                 dbname=self.config.dbname,
                 user=self.config.user,
                 password=self.config.password,
                 host=self.config.host,
-                port=self.config.port
+                port=self.config.port,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5
             )
+            self.conn.set_session(autocommit=False)
             self.cursor = self.conn.cursor()
+            
+            self.cursor.execute("SET statement_timeout = '60s'")
 
     def close(self):
         """Close the database connection."""
@@ -52,19 +58,11 @@ class DatabaseConnection:
             raise
 
     def ensure_connection(self):
-        """Ensure database connection and cursor are active."""
+        """Check connection and reconnect if needed"""
         try:
-            # Reconnect if connection is closed
-            if not self.conn or self.conn.closed != 0:
-                self.connect()
-            # Reinitialize cursor if closed
-            if not self.cursor or self.cursor.closed:
-                self.cursor = self.conn.cursor()
-            # Validate connection with a simple query
             self.cursor.execute("SELECT 1")
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        except (psycopg2.OperationalError, psycopg2.InterfaceError, AttributeError):
             self.connect()
-            self.cursor = self.conn.cursor()
 
     def create_knowledge_base_tables(self, base_name: str):
         """Create separate tables for a specific knowledge base."""
