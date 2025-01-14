@@ -1,7 +1,7 @@
 import json
 import asyncio
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Type, Union, List
 
 from pydantic import Field
@@ -92,7 +92,7 @@ class MarketAgent(LLMAgent):
         )
 
         print("\nEpisodic Memory Results:")
-        memory_strings = [f"Memory {i+1}:\n{mem.dict()}" for i, mem in enumerate(ltm_episodes)]
+        memory_strings = [f"Memory {i+1}:\n{mem.model_dump()}" for i, mem in enumerate(ltm_episodes)]
         print("\033[94m" + "\n\n".join(memory_strings) + "\033[0m")
 
         variables = AgentPromptVariables(
@@ -106,7 +106,8 @@ class MarketAgent(LLMAgent):
         response = await self.execute(
             prompt,
             output_format=PerceptionSchema.model_json_schema(),
-            return_prompt=return_prompt
+            json_tool=structured_tool,
+            return_prompt=return_prompt,
         )
 
         if not return_prompt:
@@ -117,14 +118,14 @@ class MarketAgent(LLMAgent):
                     "environment_name": environment_name,
                     "environment_info": environment_info
                 },
-                content=json.dumps(response.get("perception", "")),
-                created_at=datetime.now(),
+                content=json.dumps(response),
+                created_at=datetime.now(timezone.utc),
             )
 
             self.episode_steps.append(perception_mem)
-            asyncio.create_task(self.short_term_memory.store_memory(perception_mem))
+            task = asyncio.create_task(self.short_term_memory.store_memory(perception_mem))
 
-            self.last_perception = response.get("perception", {})
+            self.last_perception = response
         return response
 
     async def generate_action(
@@ -139,9 +140,8 @@ class MarketAgent(LLMAgent):
             raise ValueError(f"Environment {environment_name} not found")
 
         environment = self.environments[environment_name]
-        if perception is None and not return_prompt:
-            perception_obj = await self.perceive(environment_name)
-            perception = perception_obj.get("perception", {})
+        #if perception is None and not return_prompt:
+        #    perception = await self.perceive(environment_name)
         environment_info = environment.get_global_state()
 
         action_space = environment.action_space
@@ -166,6 +166,7 @@ class MarketAgent(LLMAgent):
         response = await self.execute(
             prompt,
             output_format=action_schema,
+            json_tool=structured_tool,
             return_prompt=return_prompt
         )
 
@@ -185,11 +186,11 @@ class MarketAgent(LLMAgent):
                     "environment_info": environment_info
                 },
                 content=json.dumps(response),
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
             )
 
             self.episode_steps.append(action_mem)
-            asyncio.create_task(self.short_term_memory.store_memory(action_mem))
+            task = asyncio.create_task(self.short_term_memory.store_memory(action_mem))
 
             return action
         else:
@@ -235,10 +236,10 @@ class MarketAgent(LLMAgent):
                     "environment_info": environment_info
                 },
                 content=json.dumps(observation),
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
             )
             self.episode_steps.append(observation_mem)
-            asyncio.create_task(self.short_term_memory.store_memory(observation_mem))
+            task = asyncio.create_task(self.short_term_memory.store_memory(observation_mem))
 
         previous_strategy = "No previous strategy available"
         previous_reflection = await self.short_term_memory.retrieve_recent_memories(cognitive_step='reflection', limit=1)
@@ -262,6 +263,7 @@ class MarketAgent(LLMAgent):
         response = await self.execute(
             prompt,
             output_format=ReflectionSchema.model_json_schema(),
+            json_tool=structured_tool,
             return_prompt=return_prompt
         )
 
@@ -288,11 +290,11 @@ class MarketAgent(LLMAgent):
                     "environment_info": environment_info
                 },
                 content=json.dumps(response.get("reflection", "")),
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
             )
 
             self.episode_steps.append(reflection_mem)
-            await self.short_term_memory.store_memory(reflection_mem)
+            task = await self.short_term_memory.store_memory(reflection_mem)
 
             task_str = f"Task: {self.task}" if self.task else ""
             env_state_str = f"Environment state: {str(environment_info)}" if environment_info else ""

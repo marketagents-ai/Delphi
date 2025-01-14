@@ -79,42 +79,33 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
             print("\033[94m" + "\n\n".join(memory_strings) + "\033[0m")
 
             messages = []
-            for interaction in recent_interactions:
-                # Parse the JSON content string
-                conversation = json.loads(interaction.content)
-                if 'user_message' in conversation:
-                    messages.append({
-                        'content': conversation['user_message'],
-                        'author_id': user_id,
-                        'author_name': user_name,
-                        'timestamp': message.created_at.isoformat()
-                    })
-                if 'ai_response' in conversation:
-                    messages.append({
-                        'content': conversation['ai_response'],
-                        'author_id': str(bot.user.id),
-                        'author_name': bot.user.name,
-                        'timestamp': message.created_at.isoformat()
-                    })
-
-            # Add recent channel messages (context)
-            async for msg in message.channel.history(limit=10, oldest_first=True):
+            
+            message_history = []
+            async for msg in message.channel.history(limit=4, before=message):
+                if msg.author == bot.user or msg.author == message.author:
+                    message_history.append(msg)
+                if len(message_history) >= 4:
+                    break
+                    
+            # Add messages in chronological order
+            for msg in reversed(message_history):
                 messages.append({
                     'content': msg.content,
                     'author_id': str(msg.author.id),
                     'author_name': msg.author.name,
-                    'timestamp': msg.created_at.isoformat()
+                    'timestamp': msg.created_at.isoformat(),
+                    'message_type': 'agent_message' if msg.author == bot.user else 'user_message'
                 })
 
-            # Append the current user message
-            messages.append({
+            current_message = {
                 'content': content,
                 'author_id': user_id,
                 'author_name': user_name,
-                'timestamp': message.created_at.isoformat()
-            })
+                'timestamp': message.created_at.isoformat(),
+                'message_type': 'current_user_message'
+            }
+            messages.append(current_message)
 
-            # Call the agent
             result = await bot.message_processor.process_messages(
                 channel_info=channel_info,
                 messages=messages,
@@ -173,12 +164,6 @@ async def process_message(message, memory_store, memory_query, bot, is_command=F
         })
 
 async def process_files(message, memory_store, memory_query, bot, user_message="", knowledge_base=None, query_mode=False):
-    user_id = str(message.author.id)
-    user_name = message.author.name
-    agent_id = str(bot.user.id)
-
-    logging.info(f"Processing request from {user_name} (ID: {user_id}) in {'query_mode' if query_mode else 'file_mode'}")
-
     try:
         async with message.channel.typing():
             channel_info = {
@@ -186,112 +171,57 @@ async def process_files(message, memory_store, memory_query, bot, user_message="
                 'name': message.channel.name if hasattr(message.channel, 'name') else 'Direct Message'
             }
 
-            # Retrieve recent interactions
-            recent_interactions = memory_store.retrieve_recent_memories(
-                limit=10,
-                metadata_filters={'user_id': user_id}
-            )
+            # Process attachments
+            attachment_contents = []
+            for attachment in message.attachments:
+                if attachment.size > 1000000:
+                    await message.channel.send("File is too large. Please upload a file smaller than 1 MB.")
+                    return
+                
+                # Read the file content
+                file_content = await attachment.read()
+                try:
+                    # Try to decode as text
+                    content = file_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    await message.channel.send("Could not read file. Please ensure it's a text file.")
+                    return
+                
+                attachment_descriptions = f"{attachment.filename}: {content}"
+                attachment_contents.append(attachment_descriptions)
 
-            messages = []
-            for interaction in recent_interactions:
-                conversation_record = json.loads(interaction.content)
-                if 'user_message' in conversation_record:
-                    messages.append({
-                        'content': conversation_record['user_message'],
-                        'author_id': user_id,
-                        'author_name': user_name,
-                        'timestamp': message.created_at.isoformat()
-                    })
-                if 'ai_response' in conversation_record:
-                    messages.append({
-                        'content': conversation_record['ai_response'],
-                        'author_id': str(bot.user.id),
-                        'author_name': bot.user.name,
-                        'timestamp': message.created_at.isoformat()
-                    })
+            combined_content = f"{user_message}\nFile Contents:\n" + "\n---\n".join(attachment_contents)
 
-            if query_mode:
-                # Query mode: we assume user_message is a query to the knowledge base
-                if not knowledge_base:
-                    raise ValueError("No knowledge_base provided for query_mode")
-
-                # Provide the KB's table_prefix to the memory_query
-                kb_results = memory_query.search_knowledge_base(knowledge_base.table_prefix, user_message, top_k=10)
-                # Add kb results as context
-                for i, res in enumerate(kb_results, 1):
-                    chunk_text = f"[Repo Chunk {i} | Sim: {res.similarity:.3f}]\n{res.text}"
-                    messages.append({
-                        'content': chunk_text,
-                        'author_id': str(bot.user.id),
-                        'author_name': 'SystemContext',
-                        'timestamp': message.created_at.isoformat()
-                    })
-
-                content = user_message
-            else:
-                # File mode
-                if not message.attachments:
-                    raise ValueError("No attachments found in message")
-
-                attachment_descriptions = []
-                for attachment in message.attachments:
-                    if attachment.size > 1000000:
-                        await message.channel.send("File is too large. Please upload a file smaller than 1 MB.")
-                        return
-                    attachment_descriptions.append(f"{attachment.filename} ({attachment.url})")
-
-                content = f"{message.content}\nAttachments: {', '.join(attachment_descriptions)}"
-
-            # Add the current user message or query
-            messages.append({
-                'content': content,
-                'author_id': user_id,
-                'author_name': user_name,
-                'timestamp': message.created_at.isoformat()
-            })
+            messages = [{
+                'content': combined_content,
+                'author_id': str(message.author.id),
+                'author_name': message.author.name,
+                'timestamp': message.created_at.isoformat(),
+                'message_type': 'current_user_message'
+            }]
 
             # Process with the agent
-            result = await bot.message_processor.process_messages(channel_info, messages)
-            action_result = result.get('action')
-
-            if action_result and action_result.get('content'):
-                response_content = action_result['content']['action']['content']
-                await send_long_message(message.channel, response_content)
-                logging.info(f"Sent response to {user_name} (ID: {user_id}): {response_content[:1000]}...")
-
-                # Store interaction in short-term memory
-                conversation_record = {
-                    "user_message": content,
-                    "ai_response": response_content
+            result = await bot.message_processor.process_messages(
+                channel_info=channel_info,
+                messages=messages,
+                user_info={
+                    "user_id": str(message.author.id),
+                    "user_name": message.author.name
                 }
-                memory_store.store_memory(MemoryObject(
-                    agent_id=agent_id,
-                    cognitive_step="conversation" if query_mode else "file_analysis",
-                    content=json.dumps(conversation_record),
-                    metadata={
-                        'user_id': user_id,
-                        'user_name': user_name
-                    }
-                ))
+            )
 
-                log_event = 'repo_query' if query_mode else 'file_analysis'
-                log_to_jsonl({
-                    'event': log_event,
-                    'timestamp': datetime.now().isoformat(),
-                    'user_id': user_id,
-                    'user_name': user_name,
-                    'channel': message.channel.name if hasattr(message.channel, 'name') else 'DM',
-                    'user_message': content,
-                    'ai_response': response_content
-                })
-            else:
-                logging.error("No action content received from the agent")
-                await message.channel.send("I'm sorry, I couldn't process that request.")
+            if result and result.get('action'):
+                response_content = result['action'].get('content', {}).get('action', {}).get('content')
+                if response_content:
+                    await send_long_message(message.channel, response_content)
+                    return
+            
+            await message.channel.send("I couldn't process the file content properly.")
 
     except Exception as e:
-        error_message = f"An error occurred: {str(e)}"
+        error_message = f"An error occurred while processing the file: {str(e)}"
+        logging.error(f"File processing error: {str(e)}", exc_info=True)
         await message.channel.send(error_message)
-        logging.error(f"Error in processing for {user_name} (ID: {user_id}): {str(e)}")
 
 
 async def send_long_message(channel, message, max_length=1800):
