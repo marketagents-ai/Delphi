@@ -66,7 +66,7 @@ class Agent(BaseModel):
         super().__init__(**data)
         self.ai_utilities = ParallelAIUtilities()
 
-    async def execute(self, task: Optional[str] = None, output_format: Optional[Union[Dict[str, Any], str, Type[BaseModel]]] = None, return_prompt: bool = False) -> Union[str, Dict[str, Any], LLMPromptContext]:
+    async def execute(self, task: Optional[str] = None, output_format: Optional[Union[Dict[str, Any], str, Type[BaseModel]]] = None, json_tool: bool = False, return_prompt: bool = False) -> Union[str, Dict[str, Any], LLMPromptContext]:
         """Execute a task and return the result or the prompt context."""
         execution_task = task if task is not None else self.task
         if execution_task is None:
@@ -78,6 +78,10 @@ class Agent(BaseModel):
             self.llm_config.response_format = "text"
         elif execution_output_format == "tool":
             self.llm_config.response_format = "tool"
+            execution_output_format = "tool"
+        elif json_tool:
+            self.llm_config.response_format = "tool"
+            execution_output_format = self._load_output_schema(execution_output_format)
         else:
             self.llm_config.response_format = "structured_output"
             execution_output_format = self._load_output_schema(execution_output_format)
@@ -164,6 +168,14 @@ class Agent(BaseModel):
             if prompt_context.llm_config.response_format == "text":
                 return llm_output.str_content or str(llm_output.raw_result)
             elif prompt_context.llm_config.response_format in ["json_beg", "json_object", "structured_output"]:
+                if llm_output.json_object:
+                    return llm_output.json_object.object
+                elif llm_output.str_content:
+                    try:
+                        return json.loads(llm_output.str_content)
+                    except json.JSONDecodeError:
+                        return extract_json_from_response(llm_output.str_content)
+            elif prompt_context.llm_config.response_format == "tool" and prompt_context.structured_output:
                 if llm_output.json_object:
                     return llm_output.json_object.object
                 elif llm_output.str_content:
