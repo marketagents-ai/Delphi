@@ -1,7 +1,7 @@
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
 
@@ -82,7 +82,7 @@ class CognitiveMemory:
             if memory_object.embedding is None:
                 memory_object.embedding = self.embedder.get_embeddings(memory_object.content)
 
-            now = memory_object.created_at or datetime.utcnow()
+            now = memory_object.created_at or datetime.now(timezone.utc)
 
             self.db.cursor.execute(f"""
                 INSERT INTO {self.cognitive_table}
@@ -149,20 +149,25 @@ class CognitiveMemory:
 
         where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
-        query = f"""
-            SELECT 
-                memory_id, 
-                cognitive_step, 
-                content,
-                embedding, 
-                created_at, 
-                metadata
-            FROM {self.cognitive_table}
-            WHERE {where_clause}
-            ORDER BY created_at DESC
-            LIMIT %s
-        """
         params.append(limit)
+        
+        query = f"""
+            WITH recent_memories AS (
+                SELECT 
+                    memory_id, 
+                    cognitive_step, 
+                    content,
+                    embedding, 
+                    created_at, 
+                    metadata
+                FROM {self.cognitive_table}
+                WHERE {where_clause}
+                ORDER BY created_at DESC
+                LIMIT %s
+            )
+            SELECT * FROM recent_memories
+            ORDER BY created_at ASC;
+        """
 
         try:
             self.db.cursor.execute(query, tuple(params))
@@ -281,7 +286,7 @@ class EpisodicMemory:
             strategy_data = episode.strategy_update if episode.strategy_update else []
             meta = episode.metadata if episode.metadata else {}
 
-            now = episode.created_at or datetime.utcnow()
+            now = episode.created_at or datetime.now(timezone.utc)
 
             self.db.cursor.execute(f"""
                 INSERT INTO {self.episodic_table}
@@ -573,7 +578,8 @@ class LongTermMemory(BaseModel):
             cognitive_steps=csteps,
             total_reward=total_reward,
             strategy_update=strategy_update,
-            metadata=metadata
+            metadata=metadata,
+            created_at=datetime.now(timezone.utc)
         )
         self.episodic_store.store_episode(episode)
 
@@ -598,6 +604,9 @@ class LongTermMemory(BaseModel):
             content_dict = json.loads(memory_item.text)
             steps_json = content_dict.get("cognitive_steps", [])
             step_objs = [CognitiveStep(**step) for step in steps_json]
+            
+            created_at_str = content_dict.get("created_at")
+            created_at = datetime.fromisoformat(created_at_str)
 
             eobj = EpisodicMemoryObject(
                 memory_id=UUID(content_dict["memory_id"]),
@@ -606,7 +615,7 @@ class LongTermMemory(BaseModel):
                 cognitive_steps=step_objs,
                 total_reward=content_dict.get("total_reward"),
                 strategy_update=content_dict.get("strategy_update"),
-                created_at=datetime.utcnow(),
+                created_at=created_at,
                 metadata=content_dict.get("metadata", {}),
                 similarity=round(memory_item.similarity, 2)
             )

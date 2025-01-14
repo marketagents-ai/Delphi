@@ -100,6 +100,7 @@ class MemoryRetriever:
                 total_reward, 
                 strategy_update, 
                 metadata,
+                created_at,
                 (1 - (embedding <=> %s::vector)) AS similarity
             FROM {agent_episodic_table}
             ORDER BY similarity DESC
@@ -108,14 +109,15 @@ class MemoryRetriever:
 
         rows = self.db.cursor.fetchall()
         results = []
-        for (mem_id, task_query, steps_json, total_reward, strategy_update, meta, sim) in rows:
+        for (mem_id, task_query, steps_json, total_reward, strategy_update, meta, created_at, sim) in rows:
             content_dict = {
                 "memory_id": str(mem_id),
                 "task_query": task_query,
                 "cognitive_steps": steps_json,
                 "total_reward": total_reward,
                 "strategy_update": strategy_update,
-                "metadata": meta
+                "metadata": meta,
+                "created_at": created_at.isoformat()
             }
             content_str = json.dumps(content_dict)
             results.append(RetrievedMemory(text=content_str, similarity=sim, context=""))
