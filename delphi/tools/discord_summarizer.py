@@ -1,6 +1,7 @@
+import asyncio
 from asyncio.log import logger
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -20,13 +21,13 @@ class ChannelSummarizer:
     - Uses real Discord message author_id/author_name for each message
     """
 
-    def __init__(self, bot, prompt_formats, system_prompts, max_entries=100):
+    def __init__(self, bot, prompt_formats, system_prompts, max_entries=50):
         """
         Args:
             bot: The Discord bot instance
             prompt_formats (dict): Dictionary of prompt templates
             system_prompts (dict): Dictionary of system prompt templates
-            max_entries (int, optional): Maximum messages to analyze. Defaults to 100.
+            max_entries (int, optional): Maximum messages to analyze. Defaults to 50.
         """
         self.bot = bot
         self.max_entries = max_entries
@@ -34,20 +35,11 @@ class ChannelSummarizer:
         self.system_prompts = system_prompts
 
     async def summarize_channel(self, ctx):
-        """
-        Summarize messages from the current channel (ctx.channel) and its threads.
-
-        Args:
-            ctx: The command context from Discord.py (contains channel, author, etc.)
-
-        Returns:
-            str: A formatted summary of the channel activity and content
-        """
+        """Summarize messages from the current channel and its threads."""
         channel = ctx.channel
         if not channel:
             return "Channel not found."
 
-        # Grab the actual user who ran !summarize
         requester_id = str(ctx.author.id)
         requester_name = ctx.author.name
 
@@ -79,18 +71,17 @@ class ChannelSummarizer:
                 )
                 summary += f"\n{thread_summary}"
 
-        # Store summary in memory_store
-        self.bot.memory_store.store_memory(MemoryObject(
+        # Store summary in memory_store - FIX: Add await here
+        task = asyncio.create_task(self.bot.memory_store.store_memory(MemoryObject(
             agent_id=str(self.bot.user.id),
             cognitive_step="channel_summary",
             content=summary,
             metadata={
                 "channel_id": str(channel.id),
-                "timestamp": datetime.now().isoformat(),
-                "requested_by_id": requester_id,
-                "requested_by_name": requester_name,
+                "user_id": requester_id,
+                "user_name": requester_name,
             }
-        ))
+        )))
 
         return summary
 
@@ -197,13 +188,23 @@ class ChannelSummarizer:
 
         # Build the payload with real author data
         messages_payload = []
-        for msg in reversed_msgs:
-            messages_payload.append({
-                "content": msg.content,
-                "author_id": str(msg.author.id),
-                "author_name": msg.author.name,
-                "timestamp": msg.created_at.isoformat()
-            })
+        for msg in messages:
+                messages_payload.append({
+                    'content': msg.content,
+                    'author_id': str(msg.author.id),
+                    'author_name': msg.author.name,
+                    'timestamp': msg.created_at.isoformat(),
+                    'message_type': 'channel_message'
+                })
+
+        # Add the summary command as the current message
+        messages_payload.append({
+            'content': f'Generate channel summary for {context_label}',
+            'author_id': requester_id,
+            'author_name': requester_name,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'message_type': 'current_user_message'
+        })
 
         channel_info = {
             "id": str(channel.id),
@@ -223,7 +224,10 @@ class ChannelSummarizer:
                 user_info=user_info
             )
             
+            print(result)
+
             action_result = result.get("action")
+            
 
             if action_result and action_result.get("action"):
                 content = action_result["action"].get("content", {})
