@@ -120,24 +120,28 @@ class MessageProcessor:
             return False
 
     async def process_messages(self, channel_info, messages, message_type=None, user_info=None):
-        """
-        Process messages through the agent's built-in cognitive pipeline:
-          - Perceive
-          - Generate Action
-          - Reflect
-        The agent stores memory automatically, so we don't manually store steps.
-        """
         try:
             if not messages:
                 logger.warning("No messages to process")
                 return
+
+            # Find the current message
+            current_message = next(
+                (msg for msg in messages if msg['message_type'] == 'current_user_message'),
+                messages[-1]
+            )
+
+            # Set the current message as the agent's task
+            self.agent.task = current_message['content']
+            logger.info(f"Set agent task to: {self.agent.task}")
 
             # Update environment state
             environment_info = {
                 "bot_id": self.bot_id,
                 "channel_id": channel_info["id"],
                 "channel_name": channel_info["name"],
-                "messages": messages
+                "messages": messages,
+                "current_message": current_message
             }
             self.environment.mechanism.update_state(environment_info)
 
@@ -151,13 +155,11 @@ class MessageProcessor:
                     'user_name': user_info['user_name']
                 })
 
-            # If message_type == "auto", call perceive
-            perception_result = None
-            if message_type == "auto":
-                perception_result = await self.agent.perceive('discord')
-                logger.info("Perception completed")
-                print("\nPerception Result:")
-                print("\033[94m" + json.dumps(perception_result, indent=2) + "\033[0m")
+            # Process through cognitive pipeline
+            perception_result = await self.agent.perceive('discord')
+            logger.info("Perception completed")
+            print("\nPerception Result:")
+            print("\033[94m" + json.dumps(perception_result, indent=2) + "\033[0m")
 
             # Generate action
             action_schema = None
@@ -172,22 +174,10 @@ class MessageProcessor:
                 return_prompt=False,
                 structured_tool=False,
                 action_schema=action_schema
-                
             )
-            if action_result:
-                logger.info("Action generation completed")
-                print("\nAction Result:")
-                print("\033[92m" + json.dumps(action_result, indent=2) + "\033[0m")
-
-            # Update environment with the action results
-            if action_result:
-                self.environment.mechanism.update_state({
-                    "bot_id": self.bot_id,
-                    "channel_id": channel_info["id"],
-                    "channel_name": channel_info["name"],
-                    "messages": messages,
-                    "last_action": action_result
-                })
+            
+            # Clear the task after processing
+            self.agent.task = None
 
             # Reflection runs in parallel
             reflection_task = asyncio.create_task(self._run_reflection())
